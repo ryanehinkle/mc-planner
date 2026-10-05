@@ -22,3 +22,12 @@
 .tool b{font-size:22px}.tool span{font-size:10px}
 .canvas-wrap{width:100%;height:100%}
 .workspace.right-collapsed .canvas-wrap,.workspace.left-collapsed .canvas-wrap{width:100%;height:100%}
+
+.mirror-controls{margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.mirror-controls.hidden{display:none}
+.mirror-controls input{width:100%;accent-color:var(--green)}
+.mirror-presets{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:7px}
+.mirror-presets button{padding:5px 2px;background:#1a1d20;border:1px solid var(--line);border-radius:4px;color:#c7cdd1;cursor:pointer;font-size:9px}
+.mirror-presets button:hover{background:#25292d}
+.mirror-hint{margin-top:7px;color:#7f898f;font-size:9px;line-height:1.35}
+.mirror-actions{display:flex;gap:4px}
