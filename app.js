@@ -238,11 +238,11 @@ function openModal(id){$('#'+id).classList.remove('hidden');if(id==='blockModal'
 function closeModal(id){$('#'+id).classList.add('hidden')}
 function syncSettings(){$('#gridToggle').checked=state.showGrid;$('#chunkToggle').checked=state.showChunks;$('#coordsToggle').checked=state.showCoords;$('#autosaveToggle').checked=state.autosave}
 
-$('.tool').forEach(b=>b.onclick=()=>{$('.tool').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.tool=b.dataset.tool;state.preview=[];state.polygon=[];state.curveStage=null;state.mirrorHover=null;$('#mirrorControls').classList.toggle('hidden',state.tool!=='mirror');canvas.style.cursor=state.tool==='pan'?'grab':'crosshair';draw()});
+$$('.tool').forEach(b=>b.onclick=()=>{$$('.tool').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.tool=b.dataset.tool;state.preview=[];state.polygon=[];state.curveStage=null;state.mirrorHover=null;$('#mirrorControls').classList.toggle('hidden',state.tool!=='mirror');canvas.style.cursor=state.tool==='pan'?'grab':'crosshair';draw()});
 function updateMirrorStatus(){const el=$('#mirrorStatus');if(!el)return;$('#mirrorCount').textContent=state.mirrorLines.length;el.classList.toggle('hidden',!state.mirrorLines.length)}
 function setMirrorAngle(v){state.mirrorAngle=((+v%180)+180)%180;$('#mirrorAngle').value=state.mirrorAngle;$('#mirrorAngleLabel').textContent=state.mirrorAngle+'°';draw()}
 $('#mirrorAngle').oninput=e=>setMirrorAngle(e.target.value);
-$('.mirror-presets button').forEach(b=>b.onclick=()=>setMirrorAngle(b.dataset.angle));
+$$('.mirror-presets button').forEach(b=>b.onclick=()=>setMirrorAngle(b.dataset.angle));
 $('#undoMirrorBtn').onclick=()=>{state.mirrorLines.pop();updateMirrorStatus();draw();autosave()};
 $('#clearMirrorBtn').onclick=()=>{state.mirrorLines=[];state.mirrorHover=null;updateMirrorStatus();draw();autosave()};
 const workspace=$('.workspace');
