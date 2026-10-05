@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101214">
+  <title>MC Planner</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand"><span class="grass-icon"></span><strong>MC Planner</strong></div>
+    <div class="top-actions">
+      <button id="newBtn">New</button><button id="importBtn">Import</button><button id="saveBtn">Save</button>
+      <button id="exportBtn">Export PNG</button><button id="pdfBtn">Export PDF</button>
+      <button id="referenceBtn">Reference</button><span class="top-sep"></span>
+      <button id="undoBtn" class="square" title="Undo">↶</button><button id="redoBtn" class="square" title="Redo">↷</button>
+    </div>
+    <div class="top-right"><button id="settingsBtn" class="square">⚙</button><button id="helpBtn" class="square">?</button></div>
+  </header>
+
+  <main class="workspace">
+    <aside class="leftbar">
+      <div class="tool-grid">
+        <button class="tool active" data-tool="brush"><b>✎</b><span>Brush</span></button>
+        <button class="tool" data-tool="eraser"><b>⌫</b><span>Eraser</span></button>
+        <button class="tool" data-tool="fill"><b>▣</b><span>Fill</span></button>
+        <button class="tool" data-tool="picker"><b>⌾</b><span>Picker</span></button>
+        <button class="tool" data-tool="pan"><b>✥</b><span>Pan</span></button>
+        <button class="tool" data-tool="line"><b>╱</b><span>Line</span></button>
+        <button class="tool" data-tool="rectangle"><b>□</b><span>Rect</span></button>
+        <button class="tool" data-tool="circle"><b>○</b><span>Circle</span></button>
+        <button class="tool" data-tool="ellipse"><b>⬭</b><span>Oval</span></button>
+        <button class="tool" data-tool="triangle"><b>△</b><span>Triangle</span></button>
+        <button class="tool" data-tool="polygon"><b>⬡</b><span>Polygon</span></button>
+        <button class="tool" data-tool="curve"><b>⌁</b><span>Curve</span></button>
+      </div>
+      <div class="divider"></div>
+      <div class="side-label">Brush Size <span id="brushSizeLabel">1</span></div>
+      <input id="brushSize" type="range" min="1" max="9" step="1" value="1">
+      <div class="divider"></div>
+      <div class="side-label">Mirror</div>
+      <div class="mirror-grid">
+        <button class="mirror active" data-mirror="none">Off</button><button class="mirror" data-mirror="x">X</button>
+        <button class="mirror" data-mirror="y">Y</button><button class="mirror" data-mirror="both">XY</button>
+      </div>
+    </aside>
+
+    <section id="canvasWrap" class="canvas-wrap">
+      <canvas id="planner"></canvas>
+      <div id="loadingBlocks" class="loading-blocks">Loading vanilla Minecraft blocks…</div>
+      <div class="canvas-info"><span id="coordStatus">X 0 · Z 0</span><span id="zoomStatus">100%</span></div>
+      <div class="zoom"><button id="zoomOut">−</button><button id="zoomReset">100%</button><button id="zoomIn">+</button></div>
+    </section>
+
+    <aside class="rightbar">
+      <section class="panel-section">
+        <div class="section-title"><span>Block</span><button id="chooseBlockBtn" class="tiny">Change</button></div>
+        <button id="currentBlock" class="current-block"><img id="currentBlockImg" alt=""><span><strong id="currentBlockName">Stone Bricks</strong><small>Click to select any block</small></span></button>
+      </section>
+      <section class="panel-section">
+        <div class="section-title"><span>Block Key</span><button id="clearPaletteBtn" class="tiny">Clean</button></div>
+        <div id="palette" class="palette"></div>
+      </section>
+      <section class="panel-section">
+        <div class="section-title"><span>Layers</span><button id="addLayerBtn" class="tiny">+ Add</button></div>
+        <div id="layers" class="layers"></div>
+      </section>
+      <section class="panel-section materials-panel">
+        <div class="section-title"><span>Materials</span><small id="totalBlocks">0 blocks</small></div>
+        <div id="materials" class="materials"><div class="empty">Nothing placed yet.</div></div>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<div id="blockModal" class="modal hidden"><div class="modal-card blocks-card">
+  <div class="modal-head"><div><h2>Select Block</h2><p>Vanilla Minecraft textures · PixiGeko/Minecraft-default-assets</p></div><button class="close" data-close="blockModal">×</button></div>
+  <div class="search-row"><input id="blockSearch" placeholder="Search any Minecraft block…" autocomplete="off"><span id="blockCountLabel">Loading…</span></div>
+  <div id="blockGrid" class="block-grid"></div>
+</div></div>
+
+<div id="settingsModal" class="modal hidden"><div class="modal-card small-card">
+  <div class="modal-head"><div><h2>Settings</h2><p>Display and planner behavior</p></div><button class="close" data-close="settingsModal">×</button></div>
+  <div class="settings-list">
+    <label><span><b>Grid</b><small>Show each block cell</small></span><input id="gridToggle" type="checkbox" checked></label>
+    <label><span><b>Big Grid</b><small>Highlight 16×16 chunk lines</small></span><input id="chunkToggle" type="checkbox" checked></label>
+    <label><span><b>Coordinates</b><small>Show X/Z coordinate labels</small></span><input id="coordsToggle" type="checkbox" checked></label>
+    <label><span><b>Autosave</b><small>Remember this project locally</small></span><input id="autosaveToggle" type="checkbox" checked></label>
+  </div>
+</div></div>
+
+<div id="referenceModal" class="modal hidden"><div class="modal-card small-card">
+  <div class="modal-head"><div><h2>Reference / Hologram</h2><p>Place a transparent image underneath the grid</p></div><button class="close" data-close="referenceModal">×</button></div>
+  <div class="reference-body">
+    <button id="uploadReference" class="wide-btn">Upload PNG / JPG</button>
+    <label>Opacity <input id="referenceOpacity" type="range" min="0" max="1" step=".05" value=".35"></label>
+    <label>Scale <input id="referenceScale" type="range" min=".1" max="5" step=".1" value="1"></label>
+    <button id="clearReference" class="wide-btn danger">Remove reference</button>
+  </div>
+</div></div>
+
+<div id="helpModal" class="modal hidden"><div class="modal-card small-card">
+  <div class="modal-head"><div><h2>MC Planner</h2><p>Block-texture Minecraft planning</p></div><button class="close" data-close="helpModal">×</button></div>
+  <div class="help">
+    <p><b>Left click</b> draw/use tool · <b>Right click</b> erase · <b>Middle click</b> pan · <b>Wheel</b> zoom</p>
+    <p><b>Ctrl+Z / Ctrl+Y</b> undo/redo · <b>Esc</b> cancel shape preview · <b>Space</b> temporary pan</p>
+    <p>Each planner cell stores a real Minecraft block ID and renders its vanilla 16×16 texture. Materials are counted automatically.</p>
+    <p>Shape tools: click-drag for line/rectangle/circle/oval/triangle. Polygon: click points, double-click to finish. Curve: click-drag to set endpoints, then move/click to bend.</p>
+  </div>
+</div></div>
+
+<input id="fileInput" type="file" accept=".mcplan,.json" hidden>
+<input id="referenceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
+<script src="app.js"></script>
+</body></html>
