@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#101214">
   <title>MC Planner</title>
-  <link rel="stylesheet" href="styles.css?v=20261005-4">
+  <link rel="stylesheet" href="styles.css?v=20261005-5">
 </head>
 <body>
 <div id="app">
@@ -40,8 +40,17 @@
       <div class="divider"></div>
       <div class="side-label">Brush Size <span id="brushSizeLabel">1</span></div>
       <input id="brushSize" type="range" min="1" max="9" step="1" value="1">
+      <div id="mirrorControls" class="mirror-controls hidden">
+        <div class="side-label">Mirror Angle <span id="mirrorAngleLabel">0°</span></div>
+        <input id="mirrorAngle" type="range" min="0" max="179" step="1" value="0">
+        <div class="mirror-presets">
+          <button data-angle="0">0°</button><button data-angle="45">45°</button><button data-angle="90">90°</button><button data-angle="135">135°</button>
+        </div>
+        <div class="mirror-hint">Hover the grid, then click to place an axis.</div>
+      </div>
       <div id="mirrorStatus" class="mirror-status hidden">
-        <span>Mirror axis active</span><button id="clearMirrorBtn">Clear</button>
+        <span><b id="mirrorCount">0</b> mirror axes</span>
+        <span class="mirror-actions"><button id="undoMirrorBtn">Undo</button><button id="clearMirrorBtn">Clear</button></span>
       </div>
     </aside>
 
@@ -108,12 +117,12 @@
     <p><b>Ctrl+Z / Ctrl+Y</b> undo/redo · <b>Esc</b> cancel shape preview · <b>Space</b> temporary pan</p>
     <p>Each planner cell stores a real Minecraft block ID and renders its vanilla 16×16 texture. Materials are counted automatically.</p>
     <p>Shape tools: click-drag for line/rectangle/circle/oval/triangle. Polygon: click points, double-click to finish. Curve: click-drag to set endpoints, then move/click to bend.</p>
-    <p><b>Mirror:</b> choose the Mirror tool and drag an axis anywhere on the grid. Horizontal, vertical, diagonal, and arbitrary-angle axes are supported. Drawing tools reflect live across the active axis.</p>
+    <p><b>Mirror:</b> choose the Mirror tool, set an angle, hover to preview the grid-aligned axis, then click once to place it. Add multiple axes for compound symmetry. Drawing tools reflect live across every placed axis.</p>
   </div>
 </div></div>
 
 <input id="fileInput" type="file" accept=".mcplan,.json" hidden>
 <input id="referenceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script src="app.js?v=20261005-4"></script>
+<script src="app.js?v=20261005-5"></script>
 </body></html>
