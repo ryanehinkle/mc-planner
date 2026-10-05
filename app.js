@@ -152,7 +152,7 @@ function pointerUp(e){
  if(state.panning){state.panning=false;state.dragging=false;autosave();return}
  if(!state.dragging)return;const p=screenToCell(e.clientX,e.clientY);
  if(['line','rectangle','circle','ellipse','triangle'].includes(state.tool))commitPoints(toolPreview(state.start,p));
- else if(state.tool==='curve'&&!state.curveStage){state.curveStage={start:state.start,end:p};state.preview=bresenham(state.start,p)}
+ else if(state.tool==='curve'&&!state.curveStage){state.curveStage={start:state.start,end:p,ready:false};state.preview=bresenham(state.start,p);setTimeout(()=>{if(state.curveStage)state.curveStage.ready=true},0)}
  else if(['brush','eraser'].includes(state.tool)){renderUI();autosave()}
  state.dragging=false;
 }
@@ -210,7 +210,7 @@ $('#referenceOpacity').oninput=e=>{state.refOpacity=+e.target.value;draw()};$('#
 
 canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventListener('mousedown',pointerDown);window.addEventListener('mousemove',pointerMove);window.addEventListener('mouseup',pointerUp);
 canvas.addEventListener('dblclick',e=>{if(state.tool==='polygon'&&state.polygon.length>2){commitPoints(polygonOutline(state.polygon));state.polygon=[];state.dragging=false}else if(state.tool==='curve'&&state.curveStage?.end){const c=screenToCell(e.clientX,e.clientY);commitPoints(bezierPts(state.curveStage.start,c,state.curveStage.end));state.curveStage=null}});
-canvas.addEventListener('click',e=>{if(state.tool==='curve'&&state.curveStage?.end&&!state.dragging){const c=screenToCell(e.clientX,e.clientY);commitPoints(bezierPts(state.curveStage.start,c,state.curveStage.end));state.curveStage=null}});
+canvas.addEventListener('click',e=>{if(state.tool==='curve'&&state.curveStage?.end&&state.curveStage.ready&&!state.dragging){const c=screenToCell(e.clientX,e.clientY);commitPoints(bezierPts(state.curveStage.start,c,state.curveStage.end));state.curveStage=null}});
 canvas.addEventListener('wheel',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();zoomAt(e.deltaY<0?1.12:1/1.12,e.clientX-r.left,e.clientY-r.top)},{passive:false});
 window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}else if(e.code==='Space'&&!/INPUT/.test(document.activeElement.tagName)){e.preventDefault();state.spacePan=true;canvas.style.cursor='grab'}else if(e.key==='Escape'){state.preview=[];state.polygon=[];state.curveStage=null;$$('.modal:not(.hidden)').forEach(m=>m.classList.add('hidden'));draw()}else{const map={b:'brush',e:'eraser',f:'fill',i:'picker',l:'line',r:'rectangle',c:'circle',o:'ellipse',t:'triangle',p:'polygon'};const t=map[e.key.toLowerCase()];if(t){const b=$('.tool[data-tool="'+t+'"]');b?.click()}}});
 window.addEventListener('keyup',e=>{if(e.code==='Space'){state.spacePan=false;canvas.style.cursor=state.tool==='pan'?'grab':'crosshair'}});
