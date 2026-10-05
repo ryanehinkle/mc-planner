@@ -35,19 +35,19 @@
         <button class="tool" data-tool="triangle"><b>△</b><span>Triangle</span></button>
         <button class="tool" data-tool="polygon"><b>⬡</b><span>Polygon</span></button>
         <button class="tool" data-tool="curve"><b>⌁</b><span>Curve</span></button>
+        <button class="tool" data-tool="mirror"><b>⟋</b><span>Mirror</span></button>
       </div>
       <div class="divider"></div>
       <div class="side-label">Brush Size <span id="brushSizeLabel">1</span></div>
       <input id="brushSize" type="range" min="1" max="9" step="1" value="1">
-      <div class="divider"></div>
-      <div class="side-label">Mirror</div>
-      <div class="mirror-grid">
-        <button class="mirror active" data-mirror="none">Off</button><button class="mirror" data-mirror="x">X</button>
-        <button class="mirror" data-mirror="y">Y</button><button class="mirror" data-mirror="both">XY</button>
+      <div id="mirrorStatus" class="mirror-status hidden">
+        <span>Mirror axis active</span><button id="clearMirrorBtn">Clear</button>
       </div>
     </aside>
 
     <section id="canvasWrap" class="canvas-wrap">
+      <button id="leftCollapse" class="panel-toggle left-toggle" title="Collapse tools">‹</button>
+      <button id="rightCollapse" class="panel-toggle right-toggle" title="Collapse details">›</button>
       <canvas id="planner"></canvas>
       <div id="loadingBlocks" class="loading-blocks">Loading vanilla Minecraft blocks…</div>
       <div class="canvas-info"><span id="coordStatus">X 0 · Z 0</span><span id="zoomStatus">100%</span></div>
@@ -108,6 +108,7 @@
     <p><b>Ctrl+Z / Ctrl+Y</b> undo/redo · <b>Esc</b> cancel shape preview · <b>Space</b> temporary pan</p>
     <p>Each planner cell stores a real Minecraft block ID and renders its vanilla 16×16 texture. Materials are counted automatically.</p>
     <p>Shape tools: click-drag for line/rectangle/circle/oval/triangle. Polygon: click points, double-click to finish. Curve: click-drag to set endpoints, then move/click to bend.</p>
+    <p><b>Mirror:</b> choose the Mirror tool and drag an axis anywhere on the grid. Horizontal, vertical, diagonal, and arbitrary-angle axes are supported. Drawing tools reflect live across the active axis.</p>
   </div>
 </div></div>
 
