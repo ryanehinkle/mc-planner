@@ -7,7 +7,7 @@ const canvas=$('#planner'), ctx=canvas.getContext('2d'), wrap=$('#canvasWrap');
 ctx.imageSmoothingEnabled=false;
 
 const state={
- tool:'brush', brushSize:1, zoom:1, baseCell:24, panX:0, panY:0, mirrorLine:null, mirrorDraft:null,
+ tool:'brush', brushSize:1, zoom:1, baseCell:24, panX:0, panY:0, mirrorLines:[], mirrorHover:null, mirrorAngle:0,
  showGrid:true, showChunks:true, showCoords:true, autosave:true,
  current:'stone_bricks', blocks:[], blockMap:new Map(), textureCache:new Map(), palette:['stone_bricks'],
  layers:[{id:crypto.randomUUID(),name:'Layer 1',visible:true,cells:{}}], activeLayer:0,
@@ -99,6 +99,10 @@ function screenToCell(clientX,clientY){
  const r=canvas.getBoundingClientRect(), s=cellSize();
  return {x:Math.floor((clientX-r.left-state.panX)/s),y:Math.floor((clientY-r.top-state.panY)/s)};
 }
+function screenToGridIntersection(clientX,clientY){
+ const r=canvas.getBoundingClientRect(),s=cellSize();
+ return {x:Math.round((clientX-r.left-state.panX)/s),y:Math.round((clientY-r.top-state.panY)/s)};
+}
 function cellToScreen(x,y){const s=cellSize();return{x:state.panX+x*s,y:state.panY+y*s}}
 
 function draw(){
@@ -114,36 +118,36 @@ function draw(){
  if(state.showGrid&&s>=6){ctx.beginPath();ctx.strokeStyle='#2a2e3188';ctx.lineWidth=1;for(let x=minX;x<=maxX;x++){const px=Math.round(state.panX+x*s)+.5;ctx.moveTo(px,0);ctx.lineTo(px,r.height)}for(let y=minY;y<=maxY;y++){const py=Math.round(state.panY+y*s)+.5;ctx.moveTo(0,py);ctx.lineTo(r.width,py)}ctx.stroke()}
  if(state.showChunks&&s>=4){ctx.beginPath();ctx.strokeStyle='#506057aa';ctx.lineWidth=1.5;for(let x=Math.floor(minX/16)*16;x<=maxX;x+=16){const px=Math.round(state.panX+x*s)+.5;ctx.moveTo(px,0);ctx.lineTo(px,r.height)}for(let y=Math.floor(minY/16)*16;y<=maxY;y+=16){const py=Math.round(state.panY+y*s)+.5;ctx.moveTo(0,py);ctx.lineTo(r.width,py)}ctx.stroke()}
  if(state.showCoords&&s>=14){ctx.fillStyle='#778087';ctx.font='9px system-ui';ctx.textAlign='center';for(let x=Math.ceil(minX/8)*8;x<=maxX;x+=8)ctx.fillText(x,state.panX+(x+.5)*s,11);ctx.textAlign='left';for(let y=Math.ceil(minY/8)*8;y<=maxY;y+=8)ctx.fillText(y,3,state.panY+(y+.65)*s)}
- const ml=state.mirrorDraft||state.mirrorLine;
- if(ml&&!(ml.a.x===ml.b.x&&ml.a.y===ml.b.y)){
-   const a=cellToScreen(ml.a.x+.5,ml.a.y+.5),b=cellToScreen(ml.b.x+.5,ml.b.y+.5);
-   const dx=b.x-a.x,dy=b.y-a.y,L=Math.hypot(dx,dy)||1,ux=dx/L,uy=dy/L,ext=Math.max(r.width,r.height)*2;
-   ctx.save();ctx.beginPath();ctx.moveTo(a.x-ux*ext,a.y-uy*ext);ctx.lineTo(a.x+ux*ext,a.y+uy*ext);
-   ctx.strokeStyle=state.mirrorDraft?'#9be7ff':'#71d58a';ctx.lineWidth=2;ctx.setLineDash([8,6]);ctx.stroke();ctx.setLineDash([]);
-   ctx.fillStyle=state.mirrorDraft?'#9be7ff':'#71d58a';ctx.beginPath();ctx.arc(a.x,a.y,4,0,Math.PI*2);ctx.fill();ctx.beginPath();ctx.arc(b.x,b.y,4,0,Math.PI*2);ctx.fill();ctx.restore();
+ function drawMirrorAxis(line,preview=false){
+   const a=cellToScreen(line.x,line.y),ang=line.angle*Math.PI/180,ux=Math.cos(ang),uy=Math.sin(ang),ext=Math.max(r.width,r.height)*2;
+   ctx.save();ctx.globalAlpha=preview?.48:1;ctx.beginPath();ctx.moveTo(a.x-ux*ext,a.y-uy*ext);ctx.lineTo(a.x+ux*ext,a.y+uy*ext);
+   ctx.strokeStyle=preview?'#9be7ff':'#71d58a';ctx.lineWidth=preview?1.5:2;ctx.setLineDash(preview?[6,6]:[10,6]);ctx.stroke();ctx.setLineDash([]);
+   ctx.fillStyle=preview?'#9be7ff':'#71d58a';ctx.beginPath();ctx.arc(a.x,a.y,preview?3:4,0,Math.PI*2);ctx.fill();ctx.restore();
  }
+ for(const ml of state.mirrorLines)drawMirrorAxis(ml,false);
+ if(state.tool==='mirror'&&state.mirrorHover)drawMirrorAxis({x:state.mirrorHover.x,y:state.mirrorHover.y,angle:state.mirrorAngle},true);
  if(state.hover&&state.tool!=='pan'&&state.tool!=='mirror'){const p=cellToScreen(state.hover.x,state.hover.y);ctx.strokeStyle='#fff9';ctx.lineWidth=1.5;ctx.strokeRect(p.x+.75,p.y+.75,s-1.5,s-1.5)}
 }
 
-function reflectCell(x,y,line=state.mirrorLine){
- if(!line)return null;
- const ax=line.a.x+.5, ay=line.a.y+.5, bx=line.b.x+.5, by=line.b.y+.5;
- const px=x+.5, py=y+.5, vx=bx-ax, vy=by-ay, len=vx*vx+vy*vy;
- if(len<1e-8)return null;
- const t=((px-ax)*vx+(py-ay)*vy)/len;
- const qx=ax+t*vx, qy=ay+t*vy;
- const rx=2*qx-px, ry=2*qy-py;
+function reflectCellAcrossLine(x,y,line){
+ const px=x+.5,py=y+.5,ax=line.x,ay=line.y,ang=line.angle*Math.PI/180,vx=Math.cos(ang),vy=Math.sin(ang);
+ const t=(px-ax)*vx+(py-ay)*vy,qx=ax+t*vx,qy=ay+t*vy,rx=2*qx-px,ry=2*qy-py;
  return {x:Math.round(rx-.5),y:Math.round(ry-.5)};
 }
-function mirroredPoints(x,y){
- const out=[[x,y]],r=reflectCell(x,y);
- if(r&&!(r.x===x&&r.y===y))out.push([r.x,r.y]);
- return out;
+function symmetryClosure(x,y){
+ if(!state.mirrorLines.length)return [[x,y]];
+ const seen=new Map(),queue=[{x,y}],limit=64;
+ while(queue.length&&seen.size<limit){
+   const p=queue.shift(),k=p.x+','+p.y;if(seen.has(k))continue;seen.set(k,[p.x,p.y]);
+   for(const line of state.mirrorLines){const r=reflectCellAcrossLine(p.x,p.y,line),rk=r.x+','+r.y;if(!seen.has(rk))queue.push(r)}
+ }
+ return [...seen.values()];
 }
+function mirroredPoints(x,y){return symmetryClosure(x,y)}
 function mirrorPreview(points){
- if(!state.mirrorLine)return points;
- const out=[...points];
- for(const p of points){const r=reflectCell(p.x,p.y);if(r)out.push(r)}
+ if(!state.mirrorLines.length)return points;
+ const out=[];
+ for(const p of points)for(const [x,y] of symmetryClosure(p.x,p.y))out.push({x,y});
  return uniq(out);
 }
 function paintAt(x,y,id=state.current,erase=false){
@@ -172,8 +176,11 @@ function pointerDown(e){
  const p=screenToCell(e.clientX,e.clientY);state.start=p;state.dragging=true;
  if(e.button===1||state.tool==='pan'||state.spacePan){state.panning=true;state.start={x:e.clientX,y:e.clientY,panX:state.panX,panY:state.panY};return}
  if(state.tool==='mirror'){
-   if(e.button===2){state.mirrorLine=null;state.mirrorDraft=null;state.dragging=false;updateMirrorStatus();draw();autosave();return}
-   state.mirrorDraft={a:p,b:p};draw();return;
+   state.dragging=false;
+   if(e.button===2){state.mirrorLines.pop();updateMirrorStatus();draw();autosave();return}
+   const g=screenToGridIntersection(e.clientX,e.clientY);
+   state.mirrorLines.push({x:g.x,y:g.y,angle:state.mirrorAngle});
+   updateMirrorStatus();draw();autosave();return;
  }
  if(e.button===2){pushHistory();paintAt(p.x,p.y,null,true);draw();return}
  if(state.tool==='picker'){const id=topCell(p.x,p.y);if(id)setCurrent(id);state.dragging=false;return}
@@ -186,7 +193,7 @@ function pointerDown(e){
 function pointerMove(e){
  const p=screenToCell(e.clientX,e.clientY);state.hover=p;$('#coordStatus').textContent='X '+p.x+' · Z '+p.y;
  if(state.panning){state.panX=state.start.panX+(e.clientX-state.start.x);state.panY=state.start.panY+(e.clientY-state.start.y);draw();return}
- if(state.dragging&&state.tool==='mirror'&&state.mirrorDraft){state.mirrorDraft.b=p;draw();return}
+ if(state.tool==='mirror'){state.mirrorHover=screenToGridIntersection(e.clientX,e.clientY);draw();return}
  if(!state.dragging){if(state.tool==='polygon'&&state.polygon.length)state.preview=polygonOutline([...state.polygon,p]);if(state.curveStage?.end)state.preview=bezierPts(state.curveStage.start,p,state.curveStage.end);draw();return}
  if(['brush','eraser'].includes(state.tool)){paintAt(p.x,p.y,state.current,state.tool==='eraser');draw();return}
  if(['line','rectangle','circle','ellipse','triangle'].includes(state.tool)){state.preview=toolPreview(state.start,p);draw()}
@@ -195,10 +202,6 @@ function pointerMove(e){
 function pointerUp(e){
  if(state.panning){state.panning=false;state.dragging=false;autosave();return}
  if(!state.dragging)return;const p=screenToCell(e.clientX,e.clientY);
- if(state.tool==='mirror'){
-   if(state.mirrorDraft&&!(state.mirrorDraft.a.x===p.x&&state.mirrorDraft.a.y===p.y)){state.mirrorLine={a:state.mirrorDraft.a,b:p}}
-   state.mirrorDraft=null;state.dragging=false;updateMirrorStatus();draw();autosave();return;
- }
  if(['line','rectangle','circle','ellipse','triangle'].includes(state.tool))commitPoints(toolPreview(state.start,p));
  else if(state.tool==='curve'&&!state.curveStage){state.curveStage={start:state.start,end:p,ready:false};state.preview=bresenham(state.start,p);setTimeout(()=>{if(state.curveStage)state.curveStage.ready=true},0)}
  else if(['brush','eraser'].includes(state.tool)){renderUI();autosave()}
@@ -222,8 +225,8 @@ function renderUI(){renderPalette();renderLayers();renderMaterials();updateUndoR
 function updateUndoRedo(){$('#undoBtn').disabled=!state.history.length;$('#redoBtn').disabled=!state.future.length}
 
 function autosave(){if(!state.autosave)return;try{localStorage.setItem('mc-planner-v1',JSON.stringify(projectData()))}catch(e){}}
-function projectData(){return{version:1,layers:state.layers,activeLayer:state.activeLayer,palette:state.palette,current:state.current,panX:state.panX,panY:state.panY,zoom:state.zoom,mirrorLine:state.mirrorLine,settings:{grid:state.showGrid,chunks:state.showChunks,coords:state.showCoords}}}
-function loadProject(v){if(!v||!Array.isArray(v.layers))throw Error('Invalid project');state.layers=v.layers;state.activeLayer=v.activeLayer||0;state.palette=v.palette||[];state.current=v.current||'stone_bricks';state.panX=v.panX??state.panX;state.panY=v.panY??state.panY;state.zoom=v.zoom||1;state.mirrorLine=v.mirrorLine||null;updateMirrorStatus();if(v.settings){state.showGrid=v.settings.grid!==false;state.showChunks=v.settings.chunks!==false;state.showCoords=v.settings.coords!==false}state.history=[];state.future=[];syncSettings();renderUI();draw();autosave()}
+function projectData(){return{version:1,layers:state.layers,activeLayer:state.activeLayer,palette:state.palette,current:state.current,panX:state.panX,panY:state.panY,zoom:state.zoom,mirrorLines:state.mirrorLines,mirrorAngle:state.mirrorAngle,settings:{grid:state.showGrid,chunks:state.showChunks,coords:state.showCoords}}}
+function loadProject(v){if(!v||!Array.isArray(v.layers))throw Error('Invalid project');state.layers=v.layers;state.activeLayer=v.activeLayer||0;state.palette=v.palette||[];state.current=v.current||'stone_bricks';state.panX=v.panX??state.panX;state.panY=v.panY??state.panY;state.zoom=v.zoom||1;state.mirrorLines=Array.isArray(v.mirrorLines)?v.mirrorLines:(v.mirrorLine?[{x:v.mirrorLine.a?.x??0,y:v.mirrorLine.a?.y??0,angle:0}]:[]);state.mirrorAngle=Number.isFinite(v.mirrorAngle)?v.mirrorAngle:0;updateMirrorStatus();if(v.settings){state.showGrid=v.settings.grid!==false;state.showChunks=v.settings.chunks!==false;state.showCoords=v.settings.coords!==false}state.history=[];state.future=[];syncSettings();renderUI();draw();autosave()}
 function download(name,data,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function exportImage(){
  const oldHover=state.hover,oldPrev=state.preview;state.hover=null;state.preview=[];draw();
@@ -235,9 +238,13 @@ function openModal(id){$('#'+id).classList.remove('hidden');if(id==='blockModal'
 function closeModal(id){$('#'+id).classList.add('hidden')}
 function syncSettings(){$('#gridToggle').checked=state.showGrid;$('#chunkToggle').checked=state.showChunks;$('#coordsToggle').checked=state.showCoords;$('#autosaveToggle').checked=state.autosave}
 
-$$('.tool').forEach(b=>b.onclick=()=>{$$('.tool').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.tool=b.dataset.tool;state.preview=[];state.polygon=[];state.curveStage=null;state.mirrorDraft=null;canvas.style.cursor=state.tool==='pan'?'grab':'crosshair';draw()});
-function updateMirrorStatus(){const el=$('#mirrorStatus');if(!el)return;el.classList.toggle('hidden',!state.mirrorLine)}
-$('#clearMirrorBtn').onclick=()=>{state.mirrorLine=null;state.mirrorDraft=null;updateMirrorStatus();draw();autosave()};
+$('.tool').forEach(b=>b.onclick=()=>{$('.tool').forEach(x=>x.classList.remove('active'));b.classList.add('active');state.tool=b.dataset.tool;state.preview=[];state.polygon=[];state.curveStage=null;state.mirrorHover=null;$('#mirrorControls').classList.toggle('hidden',state.tool!=='mirror');canvas.style.cursor=state.tool==='pan'?'grab':'crosshair';draw()});
+function updateMirrorStatus(){const el=$('#mirrorStatus');if(!el)return;$('#mirrorCount').textContent=state.mirrorLines.length;el.classList.toggle('hidden',!state.mirrorLines.length)}
+function setMirrorAngle(v){state.mirrorAngle=((+v%180)+180)%180;$('#mirrorAngle').value=state.mirrorAngle;$('#mirrorAngleLabel').textContent=state.mirrorAngle+'°';draw()}
+$('#mirrorAngle').oninput=e=>setMirrorAngle(e.target.value);
+$('.mirror-presets button').forEach(b=>b.onclick=()=>setMirrorAngle(b.dataset.angle));
+$('#undoMirrorBtn').onclick=()=>{state.mirrorLines.pop();updateMirrorStatus();draw();autosave()};
+$('#clearMirrorBtn').onclick=()=>{state.mirrorLines=[];state.mirrorHover=null;updateMirrorStatus();draw();autosave()};
 const workspace=$('.workspace');
 function setPanelState(side,collapsed){
  workspace.classList.toggle(side+'-collapsed',collapsed);
@@ -260,7 +267,7 @@ $('#gridToggle').onchange=e=>{state.showGrid=e.target.checked;draw();autosave()}
 $('#addLayerBtn').onclick=()=>{pushHistory();state.layers.push({id:crypto.randomUUID(),name:'Layer '+(state.layers.length+1),visible:true,cells:{}});state.activeLayer=state.layers.length-1;renderUI();draw();autosave()};
 $('#clearPaletteBtn').onclick=()=>{const used=countMaterials();state.palette=state.palette.filter(id=>used.has(id)||id===state.current);renderPalette();autosave()};
 $('#undoBtn').onclick=undo;$('#redoBtn').onclick=redo;
-$('#newBtn').onclick=()=>{if(!confirm('Start a new plan?'))return;pushHistory();state.layers=[{id:crypto.randomUUID(),name:'Layer 1',visible:true,cells:{}}];state.activeLayer=0;state.palette=[state.current];state.mirrorLine=null;state.mirrorDraft=null;updateMirrorStatus();renderUI();draw();autosave()};
+$('#newBtn').onclick=()=>{if(!confirm('Start a new plan?'))return;pushHistory();state.layers=[{id:crypto.randomUUID(),name:'Layer 1',visible:true,cells:{}}];state.activeLayer=0;state.palette=[state.current];state.mirrorLines=[];state.mirrorHover=null;updateMirrorStatus();renderUI();draw();autosave()};
 $('#saveBtn').onclick=()=>download('mc-planner.mcplan',JSON.stringify(projectData()),'application/json');
 $('#importBtn').onclick=()=>$('#fileInput').click();$('#fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{loadProject(JSON.parse(await f.text()))}catch(err){alert('Could not open that MC Planner file.')}e.target.value=''};
 $('#exportBtn').onclick=exportImage;$('#pdfBtn').onclick=exportPdf;
@@ -274,12 +281,12 @@ canvas.addEventListener('contextmenu',e=>e.preventDefault());canvas.addEventList
 canvas.addEventListener('dblclick',e=>{if(state.tool==='polygon'&&state.polygon.length>2){commitPoints(polygonOutline(state.polygon));state.polygon=[];state.dragging=false}else if(state.tool==='curve'&&state.curveStage?.end){const c=screenToCell(e.clientX,e.clientY);commitPoints(bezierPts(state.curveStage.start,c,state.curveStage.end));state.curveStage=null}});
 canvas.addEventListener('click',e=>{if(state.tool==='curve'&&state.curveStage?.end&&state.curveStage.ready&&!state.dragging){const c=screenToCell(e.clientX,e.clientY);commitPoints(bezierPts(state.curveStage.start,c,state.curveStage.end));state.curveStage=null}});
 canvas.addEventListener('wheel',e=>{e.preventDefault();const r=canvas.getBoundingClientRect();zoomAt(e.deltaY<0?1.12:1/1.12,e.clientX-r.left,e.clientY-r.top)},{passive:false});
-window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}else if(e.code==='Space'&&!/INPUT/.test(document.activeElement.tagName)){e.preventDefault();state.spacePan=true;canvas.style.cursor='grab'}else if(e.key==='Escape'){state.preview=[];state.polygon=[];state.curveStage=null;state.mirrorDraft=null;$$('.modal:not(.hidden)').forEach(m=>m.classList.add('hidden'));draw()}else{const map={b:'brush',e:'eraser',f:'fill',i:'picker',l:'line',r:'rectangle',c:'circle',o:'ellipse',t:'triangle',p:'polygon',m:'mirror'};const t=map[e.key.toLowerCase()];if(t){const b=$('.tool[data-tool="'+t+'"]');b?.click()}}});
+window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}else if(e.code==='Space'&&!/INPUT/.test(document.activeElement.tagName)){e.preventDefault();state.spacePan=true;canvas.style.cursor='grab'}else if(e.key==='Escape'){state.preview=[];state.polygon=[];state.curveStage=null;state.mirrorHover=null;$$('.modal:not(.hidden)').forEach(m=>m.classList.add('hidden'));draw()}else{const map={b:'brush',e:'eraser',f:'fill',i:'picker',l:'line',r:'rectangle',c:'circle',o:'ellipse',t:'triangle',p:'polygon',m:'mirror'};const t=map[e.key.toLowerCase()];if(t){const b=$('.tool[data-tool="'+t+'"]');b?.click()}}});
 window.addEventListener('keyup',e=>{if(e.code==='Space'){state.spacePan=false;canvas.style.cursor=state.tool==='pan'?'grab':'crosshair'}});
 window.addEventListener('resize',resize);
 const wrapResizeObserver=new ResizeObserver(()=>resize(true));
 wrapResizeObserver.observe(wrap);
 workspace.addEventListener('transitionend',()=>resize(true));
 
-(async function init(){if(innerWidth<900)setPanelState('right',true);resize();syncSettings();updateMirrorStatus();await loadBlocks();try{const saved=localStorage.getItem('mc-planner-v1');if(saved)loadProject(JSON.parse(saved));else renderUI()}catch(e){renderUI()}updateZoom();})();
+(async function init(){if(innerWidth<900)setPanelState('right',true);resize();syncSettings();setMirrorAngle(state.mirrorAngle);updateMirrorStatus();await loadBlocks();try{const saved=localStorage.getItem('mc-planner-v1');if(saved)loadProject(JSON.parse(saved));else renderUI()}catch(e){renderUI()}updateZoom();})();
 })();
