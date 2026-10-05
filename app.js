@@ -74,10 +74,21 @@ function drawTexture(img,dx,dy,s){
  ctx.imageSmoothingEnabled=false; ctx.drawImage(img,0,0,frame,frame,dx,dy,s,s);
 }
 
+let lastWrapW=0,lastWrapH=0;
 function resize(){
- const d=devicePixelRatio||1, r=wrap.getBoundingClientRect(); canvas.width=Math.floor(r.width*d);canvas.height=Math.floor(r.height*d);
- canvas.style.width=r.width+'px';canvas.style.height=r.height+'px';ctx.setTransform(d,0,0,d,0,0);
- if(!state.panX&&!state.panY){state.panX=r.width/2;state.panY=r.height/2}
+ const d=devicePixelRatio||1, r=wrap.getBoundingClientRect();
+ const w=Math.max(1,Math.round(r.width)),h=Math.max(1,Math.round(r.height));
+ if(Math.abs(w-lastWrapW)<1&&Math.abs(h-lastWrapH)<1)return;
+ const oldW=lastWrapW,oldH=lastWrapH;
+ lastWrapW=w;lastWrapH=h;
+ canvas.width=Math.max(1,Math.floor(w*d));canvas.height=Math.max(1,Math.floor(h*d));
+ canvas.style.width='100%';canvas.style.height='100%';
+ ctx.setTransform(d,0,0,d,0,0);
+ if(!state.panX&&!state.panY){state.panX=w/2;state.panY=h/2}
+ else if(oldW&&oldH){
+   state.panX+=(w-oldW)/2;
+   state.panY+=(h-oldH)/2;
+ }
  draw();
 }
 function cellSize(){return state.baseCell*state.zoom}
@@ -230,7 +241,8 @@ function setPanelState(side,collapsed){
  const btn=side==='left'?$('#leftCollapse'):$('#rightCollapse');
  btn.textContent=side==='left'?(collapsed?'›':'‹'):(collapsed?'‹':'›');
  btn.title=(collapsed?'Open ':'Collapse ')+(side==='left'?'tools':'details');
- requestAnimationFrame(resize);
+ requestAnimationFrame(()=>requestAnimationFrame(resize));
+ setTimeout(resize,220);
 }
 $('#leftCollapse').onclick=()=>setPanelState('left',!workspace.classList.contains('left-collapsed'));
 $('#rightCollapse').onclick=()=>setPanelState('right',!workspace.classList.contains('right-collapsed'));
@@ -260,6 +272,8 @@ canvas.addEventListener('wheel',e=>{e.preventDefault();const r=canvas.getBoundin
 window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}else if(e.code==='Space'&&!/INPUT/.test(document.activeElement.tagName)){e.preventDefault();state.spacePan=true;canvas.style.cursor='grab'}else if(e.key==='Escape'){state.preview=[];state.polygon=[];state.curveStage=null;state.mirrorDraft=null;$$('.modal:not(.hidden)').forEach(m=>m.classList.add('hidden'));draw()}else{const map={b:'brush',e:'eraser',f:'fill',i:'picker',l:'line',r:'rectangle',c:'circle',o:'ellipse',t:'triangle',p:'polygon',m:'mirror'};const t=map[e.key.toLowerCase()];if(t){const b=$('.tool[data-tool="'+t+'"]');b?.click()}}});
 window.addEventListener('keyup',e=>{if(e.code==='Space'){state.spacePan=false;canvas.style.cursor=state.tool==='pan'?'grab':'crosshair'}});
 window.addEventListener('resize',resize);
+const wrapResizeObserver=new ResizeObserver(()=>resize());
+wrapResizeObserver.observe(wrap);
 
 (async function init(){if(innerWidth<900)setPanelState('right',true);resize();syncSettings();updateMirrorStatus();await loadBlocks();try{const saved=localStorage.getItem('mc-planner-v1');if(saved)loadProject(JSON.parse(saved));else renderUI()}catch(e){renderUI()}updateZoom();})();
 })();
