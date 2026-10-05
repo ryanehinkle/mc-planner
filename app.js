@@ -120,7 +120,7 @@ function draw(){
  if(state.showCoords&&s>=14){ctx.fillStyle='#778087';ctx.font='9px system-ui';ctx.textAlign='center';for(let x=Math.ceil(minX/8)*8;x<=maxX;x+=8)ctx.fillText(x,state.panX+(x+.5)*s,11);ctx.textAlign='left';for(let y=Math.ceil(minY/8)*8;y<=maxY;y+=8)ctx.fillText(y,3,state.panY+(y+.65)*s)}
  function drawMirrorAxis(line,preview=false){
    const a=cellToScreen(line.x,line.y),ang=line.angle*Math.PI/180,ux=Math.cos(ang),uy=Math.sin(ang),ext=Math.max(r.width,r.height)*2;
-   ctx.save();ctx.globalAlpha=preview?.48:1;ctx.beginPath();ctx.moveTo(a.x-ux*ext,a.y-uy*ext);ctx.lineTo(a.x+ux*ext,a.y+uy*ext);
+   ctx.save();ctx.globalAlpha=preview ? .48 : 1;ctx.beginPath();ctx.moveTo(a.x-ux*ext,a.y-uy*ext);ctx.lineTo(a.x+ux*ext,a.y+uy*ext);
    ctx.strokeStyle=preview?'#9be7ff':'#71d58a';ctx.lineWidth=preview?1.5:2;ctx.setLineDash(preview?[6,6]:[10,6]);ctx.stroke();ctx.setLineDash([]);
    ctx.fillStyle=preview?'#9be7ff':'#71d58a';ctx.beginPath();ctx.arc(a.x,a.y,preview?3:4,0,Math.PI*2);ctx.fill();ctx.restore();
  }
