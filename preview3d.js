@@ -33,6 +33,7 @@ let activeCamera=null;
 let modelGroup=null;
 let grid=null;
 let catalog=null;
+let faceCatalog=null;
 let catalogPromise=null;
 let initialized=false;
 let building=false;
@@ -116,25 +117,54 @@ async function loadThree(){
   throw new Error('Could not load Three.js: '+(lastErr?.message||lastErr));
 }
 async function loadCatalog(){
-  if(catalog)return catalog;
+  if(catalog&&faceCatalog)return catalog;
   if(catalogPromise)return catalogPromise;
-  catalogPromise=fetch('blocks.json?v=20261006-1',{cache:'force-cache'})
-    .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
-    .then(rows=>{
-      catalog=new Map(rows.map(b=>[b.id,b.texture]));
-      return catalog;
-    })
-    .catch(err=>{
-      console.warn('[3D Preview] Block catalog unavailable',err);
-      catalog=new Map();
-      return catalog;
-    });
+  catalogPromise=Promise.all([
+    fetch('blocks.json?v=20261006-1',{cache:'force-cache'}).then(r=>{if(!r.ok)throw new Error('blocks '+r.status);return r.json()}),
+    fetch('block-faces.json?v=20261006-1',{cache:'force-cache'}).then(r=>{if(!r.ok)throw new Error('faces '+r.status);return r.json()})
+  ]).then(([rows,faces])=>{
+    catalog=new Map(rows.map(b=>[b.id,b.texture]));
+    faceCatalog=new Map(Object.entries(faces));
+    return catalog;
+  }).catch(err=>{
+    console.warn('[3D Preview] Block texture catalogs unavailable',err);
+    catalog=new Map();faceCatalog=new Map();
+    return catalog;
+  });
   return catalogPromise;
 }
 function textureNameFor(id){
   if(id==='water'||id==='bubble_column')return 'water_still.png';
   if(id==='lava')return 'lava_still.png';
   return catalog?.get(id)||null;
+}
+function faceTexturesForBlock(id,state){
+  if(id==='water'||id==='bubble_column')return Array(6).fill('water_still.png');
+  if(id==='lava')return Array(6).fill('lava_still.png');
+  const primary=textureNameFor(id);
+  const f=faceCatalog?.get(id)||{side:primary,top:primary,bottom:primary,front:primary,back:primary,end:null};
+  const side=f.side||primary,top=f.top||side,bottom=f.bottom||side,front=f.front||side,back=f.back||side,end=f.end||null;
+  const props=parseState(state);
+  let out=[side,side,top,bottom,side,side]; // +X,-X,+Y,-Y,+Z,-Z
+
+  if(end&&props.axis){
+    if(props.axis==='x')out=[end,end,side,side,side,side];
+    else if(props.axis==='z')out=[side,side,side,side,end,end];
+    else out=[side,side,end,end,side,side];
+    return out;
+  }
+
+  const facing=props.facing;
+  const idx={east:0,west:1,south:4,north:5};
+  const opposite={0:1,1:0,4:5,5:4};
+  if(facing&&idx[facing]!==undefined){
+    out[idx[facing]]=front;
+    out[opposite[idx[facing]]]=back;
+  }else{
+    out[4]=front;
+    out[5]=back;
+  }
+  return out;
 }
 function styleFor(id){
   if(/glass|ice|water|bubble_column/.test(id))return 'transparent';
@@ -147,21 +177,34 @@ async function textureFor(name){
   const promise=new Promise(resolve=>{
     const loader=new THREE.TextureLoader();
     loader.setCrossOrigin('anonymous');
-    loader.load(BLOCK_TEXTURE_ROOT+name,tex=>{
-      tex.colorSpace=THREE.SRGBColorSpace;
-      tex.magFilter=THREE.NearestFilter;
-      tex.minFilter=THREE.NearestFilter;
-      tex.generateMipmaps=false;
-      tex.wrapS=THREE.ClampToEdgeWrapping;
-      tex.wrapT=THREE.ClampToEdgeWrapping;
-      const img=tex.image;
-      if(img&&img.width&&img.height>img.width){
-        const f=img.width/img.height;
-        tex.repeat.set(1,f);
-        tex.offset.set(0,1-f);
+    loader.load(BLOCK_TEXTURE_ROOT+name,loaded=>{
+      try{
+        const img=loaded.image;
+        let tex=loaded;
+        // Animated Minecraft textures are vertical sprite sheets. Crop one frame
+        // before mipmapping so distant/angled views don't sample neighboring frames.
+        if(img&&img.width&&img.height>img.width){
+          const size=img.width,cv=document.createElement('canvas');
+          cv.width=size;cv.height=size;
+          const c=cv.getContext('2d',{alpha:true});
+          c.imageSmoothingEnabled=false;
+          c.drawImage(img,0,0,size,size,0,0,size,size);
+          tex.dispose?.();
+          tex=new THREE.CanvasTexture(cv);
+        }
+        tex.colorSpace=THREE.SRGBColorSpace;
+        tex.magFilter=THREE.NearestFilter;
+        tex.minFilter=THREE.NearestMipmapLinearFilter;
+        tex.generateMipmaps=true;
+        tex.anisotropy=Math.min(8,webgl?.capabilities?.getMaxAnisotropy?.()||1);
+        tex.wrapS=THREE.ClampToEdgeWrapping;
+        tex.wrapT=THREE.ClampToEdgeWrapping;
+        tex.needsUpdate=true;
+        resolve(tex);
+      }catch(err){
+        console.warn('[3D Preview] texture setup failed',name,err);
+        resolve(loaded);
       }
-      tex.needsUpdate=true;
-      resolve(tex);
     },undefined,()=>resolve(null));
   });
   textureCache.set(name,promise);
@@ -186,8 +229,6 @@ async function materialFor(textureName,style){
     opts.transparent=false;
     opts.alphaTest=0.35;
     opts.side=THREE.DoubleSide;
-  }else{
-    opts.alphaTest=0.06;
   }
   const mat=new THREE.MeshStandardMaterial(opts);
   mat.clippingPlanes=sliceEnabled?[slicePlane]:null;
@@ -195,6 +236,15 @@ async function materialFor(textureName,style){
   materialCache.set(key,mat);
   return mat;
 }
+async function materialArrayFor(faceNames,style){
+  const mats=[];
+  for(const name of faceNames)mats.push(await materialFor(name,style));
+  return mats;
+}
+function faceSignature(id,state){
+  return faceTexturesForBlock(id,state).map(x=>x||'none').join('|');
+}
+
 function stairParts(props){
   const top=props.half==='top';
   const facing=props.facing||'north';
@@ -295,8 +345,8 @@ async function buildScene(){
 
     const groups=new Map();
     for(let i=0;i<blocks.length;i++){
-      const b=blocks[i],texture=textureNameFor(b.id),style=styleFor(b.id),key=(texture||'none')+'|'+style;
-      if(!groups.has(key))groups.set(key,{texture,style,parts:[]});
+      const b=blocks[i],style=styleFor(b.id),faces=faceTexturesForBlock(b.id,b.state),key=faces.map(x=>x||'none').join('|')+'|'+style;
+      if(!groups.has(key))groups.set(key,{faces,style,parts:[]});
       const g=groups.get(key);
       for(const part of partsForBlock(b.id,b.state)){
         g.parts.push({
@@ -316,8 +366,8 @@ async function buildScene(){
     for(let gi=0;gi<entries.length;gi++){
       const g=entries[gi];
       setLoading(true,'Loading block textures…',(gi+1)+' / '+entries.length);
-      const mat=await materialFor(g.texture,g.style);
-      const mesh=new THREE.InstancedMesh(unitGeometry,mat,g.parts.length);
+      const mats=await materialArrayFor(g.faces,g.style);
+      const mesh=new THREE.InstancedMesh(unitGeometry,mats,g.parts.length);
       mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
       const q=new THREE.Quaternion(),m=new THREE.Matrix4(),pos=new THREE.Vector3(),scale=new THREE.Vector3();
       for(let i=0;i<g.parts.length;i++){
@@ -360,7 +410,7 @@ async function init3D(){
   }catch(err){
     throw new Error('WebGL could not start: '+(err?.message||err));
   }
-  webgl.setPixelRatio(Math.min(devicePixelRatio||1,2));
+  webgl.setPixelRatio(Math.min(devicePixelRatio||1,1.75));
   webgl.outputColorSpace=THREE.SRGBColorSpace;
   webgl.toneMapping=THREE.ACESFilmicToneMapping;
   webgl.toneMappingExposure=1.08;
