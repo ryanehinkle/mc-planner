@@ -229,6 +229,9 @@ async function materialFor(textureName,style){
     opts.transparent=false;
     opts.alphaTest=0.35;
     opts.side=THREE.DoubleSide;
+    opts.polygonOffset=true;
+    opts.polygonOffsetFactor=-0.15;
+    opts.polygonOffsetUnits=-0.15;
   }
   const mat=new THREE.MeshStandardMaterial(opts);
   mat.clippingPlanes=sliceEnabled?[slicePlane]:null;
@@ -245,18 +248,53 @@ function faceSignature(id,state){
   return faceTexturesForBlock(id,state).map(x=>x||'none').join('|');
 }
 
-function stairParts(props){
-  const top=props.half==='top';
-  const facing=props.facing||'north';
-  const lowY=top?.25:-.25;
-  const highY=top?-.25:.25;
-  const parts=[{sx:1,sy:.5,sz:1,ox:0,oy:lowY,oz:0}];
-  if(facing==='east')parts.push({sx:.5,sy:.5,sz:1,ox:.25,oy:highY,oz:0});
-  else if(facing==='west')parts.push({sx:.5,sy:.5,sz:1,ox:-.25,oy:highY,oz:0});
-  else if(facing==='south')parts.push({sx:1,sy:.5,sz:.5,ox:0,oy:highY,oz:.25});
-  else parts.push({sx:1,sy:.5,sz:.5,ox:0,oy:highY,oz:-.25});
-  return parts;
+function boxPart(minX,minY,minZ,maxX,maxY,maxZ){
+  return{
+    sx:maxX-minX,sy:maxY-minY,sz:maxZ-minZ,
+    ox:(minX+maxX)/2,oy:(minY+maxY)/2,oz:(minZ+maxZ)/2
+  };
 }
+function transformStairPart(part,xFlip,yDeg){
+  let x=part.ox,y=part.oy,z=part.oz;
+  if(xFlip){y=-y;z=-z}
+  const turns=((Math.round(yDeg/90)%4)+4)%4;
+  for(let i=0;i<turns;i++){const nx=-z,nz=x;x=nx;z=nz}
+  const swap=turns%2===1;
+  return{
+    sx:swap?part.sz:part.sx,
+    sy:part.sy,
+    sz:swap?part.sx:part.sz,
+    ox:x,oy:y,oz:z
+  };
+}
+function stairParts(props){
+  const shape=props.shape||'straight';
+  const facing=props.facing||'east';
+  const top=props.half==='top';
+  const facingRot={east:0,south:90,west:180,north:270}[facing]??0;
+
+  // These boxes are the vanilla block/stairs, inner_stairs and outer_stairs
+  // element bounds normalized from Minecraft's 0..16 model coordinates.
+  const slab=boxPart(-.5,-.5,-.5,.5,0,.5);
+  const eastHalf=boxPart(0,0,-.5,.5,.5,.5);
+  const southWestQuarter=boxPart(-.5,0,0,0,.5,.5);
+  const southEastQuarter=boxPart(0,0,0,.5,.5,.5);
+
+  let base;
+  if(shape.startsWith('inner'))base=[slab,eastHalf,southWestQuarter];
+  else if(shape.startsWith('outer'))base=[slab,southEastQuarter];
+  else base=[slab,eastHalf];
+
+  // Vanilla blockstate rotations:
+  // bottom-right/straight = facing rotation; bottom-left = facing - 90
+  // top-left/straight = facing rotation; top-right = facing + 90.
+  let yRot=facingRot;
+  if(!top&&shape.endsWith('_left'))yRot=(facingRot+270)%360;
+  if(top&&shape.endsWith('_right'))yRot=(facingRot+90)%360;
+
+  return base.map(part=>transformStairPart(part,top,yRot));
+}
+
 function partsForBlock(id,state){
   const p=parseState(state);
   if(id.endsWith('_slab')){
@@ -387,6 +425,14 @@ async function buildScene(){
     scene.add(grid);
 
     const diag=Math.sqrt(boundsInfo.width**2+boundsInfo.height**2+boundsInfo.depth**2);
+    const far=Math.max(128,diag*12);
+    const near=Math.max(.03,Math.min(.2,diag/5000));
+    perspectiveCamera.near=near;
+    perspectiveCamera.far=far;
+    perspectiveCamera.updateProjectionMatrix();
+    orthoCamera.near=-far;
+    orthoCamera.far=far;
+    orthoCamera.updateProjectionMatrix();
     orbit.target.set(0,0,0);
     orbit.radius=Math.max(6,diag*1.15);
     orbit.theta=Math.PI/4;
@@ -406,7 +452,15 @@ async function init3D(){
   await loadThree();
   setLoading(true,'Starting 3D engine…','Setting up WebGL');
   try{
-    webgl=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false,preserveDrawingBuffer:true,powerPreference:'high-performance'});
+    webgl=new THREE.WebGLRenderer({
+      canvas,
+      antialias:true,
+      alpha:false,
+      preserveDrawingBuffer:true,
+      powerPreference:'high-performance',
+      logarithmicDepthBuffer:true,
+      precision:'highp'
+    });
   }catch(err){
     throw new Error('WebGL could not start: '+(err?.message||err));
   }
@@ -418,10 +472,10 @@ async function init3D(){
 
   scene=new THREE.Scene();
   scene.background=new THREE.Color(0x0b0d0e);
-  scene.fog=new THREE.FogExp2(0x0b0d0e,.003);
+  scene.fog=null;
 
-  perspectiveCamera=new THREE.PerspectiveCamera(50,1,.05,100000);
-  orthoCamera=new THREE.OrthographicCamera(-10,10,10,-10,-100000,100000);
+  perspectiveCamera=new THREE.PerspectiveCamera(50,1,.1,2000);
+  orthoCamera=new THREE.OrthographicCamera(-10,10,10,-10,-2000,2000);
   activeCamera=perspectiveCamera;
   orbit.target=new THREE.Vector3();
 
