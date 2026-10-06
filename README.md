@@ -3,9 +3,9 @@
 A browser-based Minecraft build planner inspired by the workflow of MC Base Planner, but using real Minecraft block textures instead of flat colors.
 
 ## Features
-- Full-screen interactive 3D project preview powered by Schem-at's schematic-renderer
+- Full-screen interactive 3D project preview rendered natively with Three.js
 - Perspective, isometric and first-person fly cameras
-- Rendering-bounds slicing, auto orbit, screenshots, render controls and resource-pack sidebar
+- Y-layer slicing, auto orbit, screenshots, perspective/isometric views and fly controls
 - Real vanilla 16×16 block textures sourced at runtime from [PixiGeko/Minecraft-default-assets](https://github.com/PixiGeko/Minecraft-default-assets)
 - Block catalogue generated from Minecraft blockstates
 - Brush, eraser, fill, picker, line, rectangle, circle, oval, triangle, polygon, and curve tools
