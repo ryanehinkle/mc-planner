@@ -116,13 +116,15 @@
     <p><b>Left click</b> draw/use tool · <b>Right click</b> erase · <b>Middle click</b> pan · <b>Wheel</b> zoom</p>
     <p><b>Ctrl+Z / Ctrl+Y</b> undo/redo · <b>Esc</b> cancel shape preview · <b>Space</b> temporary pan</p>
     <p>Each planner cell stores a real Minecraft block ID and renders its vanilla 16×16 texture. Materials are counted automatically.</p>
+    <p><b>Import:</b> opens MC Planner files plus WorldEdit/Sponge <code>.schem</code>, legacy MCEdit <code>.schematic</code>, and Litematica <code>.litematic</code>/<code>.litematica</code>. Minecraft builds import one Y-level per planner layer.</p>
     <p>Shape tools: click-drag for line/rectangle/circle/oval/triangle. Polygon: click points, double-click to finish. Curve: click-drag to set endpoints, then move/click to bend.</p>
     <p><b>Mirror:</b> choose the Mirror tool, set an angle, hover to preview the grid-aligned axis, then click once to place it. Add multiple axes for compound symmetry. Drawing tools reflect live across every placed axis.</p>
   </div>
 </div></div>
 
-<input id="fileInput" type="file" accept=".mcplan,.json" hidden>
+<input id="fileInput" type="file" accept=".mcplan,.json,.schem,.schematic,.litematic,.litematica" hidden>
 <input id="referenceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script src="app.js?v=20261005-8"></script>
+<script src="nbt-import.js?v=20261006-1"></script>
+<script src="app.js?v=20261006-1"></script>
 </body></html>
