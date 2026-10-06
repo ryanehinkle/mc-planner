@@ -1,6 +1,6 @@
-const THREE_URLS=[
-  'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
-  'https://unpkg.com/three@0.160.0/build/three.min.js'
+const THREE_MODULE_URLS=[
+  'https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js',
+  'https://unpkg.com/three@0.184.0/build/three.module.js'
 ];
 const NUCLEATION_URLS=[
   'https://cdn.jsdelivr.net/npm/nucleation@0.2.12/nucleation-cdn-loader.js',
@@ -132,6 +132,21 @@ async function loadFirst(urls,test,label){
   }
   throw lastErr||new Error('Could not load '+label);
 }
+async function loadThree(){
+  if(window.THREE?.Object3D&&window.THREE?.REVISION)return window.THREE;
+  let lastErr=null;
+  for(const url of THREE_MODULE_URLS){
+    try{
+      setStatus('Loading Three.js 0.184…');
+      const mod=await import(url);
+      if(!mod?.Object3D||!mod?.Scene||!mod?.WebGLRenderer)throw new Error('Three.js module is incomplete');
+      window.THREE=mod;
+      return mod;
+    }catch(err){lastErr=err}
+  }
+  throw new Error('Could not load Three.js 0.184: '+(lastErr?.message||lastErr));
+}
+
 async function loadNucleation(){
   if(window.Nucleation?.SchematicWrapper)return window.Nucleation;
   let lastErr=null;
@@ -169,7 +184,7 @@ async function initRenderer(){
     setTimeout(()=>reject(new Error('3D renderer initialization timed out. Check WebGL/browser support.')),45000);
   });
   try{
-    await loadFirst(THREE_URLS,()=>!!window.THREE,'Three.js');
+    await loadThree();
     await loadNucleation();
     await loadFirst(RENDERER_URLS,()=>!!getRendererNamespace(),'Schem-at renderer');
     const rendererApi=getRendererNamespace();
