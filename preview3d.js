@@ -121,7 +121,7 @@ async function loadCatalog(){
   if(catalogPromise)return catalogPromise;
   catalogPromise=Promise.all([
     fetch('blocks.json?v=20261006-1',{cache:'force-cache'}).then(r=>{if(!r.ok)throw new Error('blocks '+r.status);return r.json()}),
-    fetch('block-faces.json?v=20261006-1',{cache:'force-cache'}).then(r=>{if(!r.ok)throw new Error('faces '+r.status);return r.json()})
+    fetch('block-faces.json?v=20261006-2',{cache:'force-cache'}).then(r=>{if(!r.ok)throw new Error('faces '+r.status);return r.json()})
   ]).then(([rows,faces])=>{
     catalog=new Map(rows.map(b=>[b.id,b.texture]));
     faceCatalog=new Map(Object.entries(faces));
