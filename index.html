@@ -124,7 +124,7 @@
 
 <div id="preview3dModal" class="preview3d hidden">
   <div class="preview3d-head">
-    <div class="preview3d-title"><strong>3D Preview</strong><small id="preview3dStatus">Schem-at renderer</small></div>
+    <div class="preview3d-title"><strong>3D Preview</strong><small id="preview3dStatus">Interactive Minecraft preview</small></div>
     <div class="preview3d-actions">
       <button id="preview3dRefresh">Refresh</button>
       <button id="preview3dPerspective">Perspective</button>
@@ -138,8 +138,13 @@
   </div>
   <div class="preview3d-stage">
     <canvas id="preview3dCanvas"></canvas>
-    <div id="preview3dLoading" class="preview3d-loading"><span class="preview3d-spinner"></span><b>Preparing 3D preview…</b><small>Loading Minecraft renderer and resource pack</small></div>
-    <div class="preview3d-hint">Left drag: orbit · Right drag: pan · Wheel: zoom · Use the renderer sidebar for render, capture, export and pack controls.</div>
+    <div id="preview3dLoading" class="preview3d-loading"><span class="preview3d-spinner"></span><b>Preparing 3D preview…</b><small>Loading the Minecraft scene</small></div>
+    <div id="preview3dSlicePanel" class="preview3d-slice hidden">
+      <div><strong>Y Slice</strong><span id="preview3dSliceValue">All layers</span></div>
+      <input id="preview3dSliceRange" type="range" min="0" max="0" step="1" value="0">
+    </div>
+    <div id="preview3dStats" class="preview3d-stats"></div>
+    <div id="preview3dHint" class="preview3d-hint">Left drag: orbit · Right drag: pan · Wheel: zoom</div>
   </div>
 </div>
 
@@ -148,5 +153,5 @@
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 <script src="nbt-import.js?v=20261006-2"></script>
 <script src="app.js?v=20261006-3"></script>
-<script defer src="preview3d.js?v=20261006-5"></script>
+<script defer src="preview3d.js?v=20261006-6"></script>
 </body></html>
