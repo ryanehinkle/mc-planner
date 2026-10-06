@@ -82,8 +82,12 @@ async function initRenderer(){
   if(readyPromise)return readyPromise;
   setLoading(true);
   setStatus('Loading Schem-at renderer…');
-  readyPromise=new Promise(resolve=>readyResolve=resolve);
-  api=await import(RENDERER_URL);
+  readyPromise=new Promise((resolve,reject)=>{
+    readyResolve=resolve;
+    setTimeout(()=>reject(new Error('3D renderer initialization timed out. Check your network/WebGL support.')),30000);
+  });
+  try{api=await import(RENDERER_URL)}
+  catch(err){readyPromise=null;throw new Error('Could not load Schem-at renderer: '+(err?.message||err))}
   const {SchematicRenderer}=api;
   renderer=new SchematicRenderer(
     canvas,
@@ -135,7 +139,9 @@ async function initRenderer(){
     }
   );
   canvas.schematicRenderer=renderer;
-  return readyPromise;
+  window.mcPlanner3DRenderer=renderer;
+  try{return await readyPromise}
+  catch(err){readyPromise=null;renderer=null;api=null;throw err}
 }
 async function loadCurrentProject(){
   if(loadingProject)return;
