@@ -31,3 +31,15 @@
 .mirror-presets button:hover{background:#25292d}
 .mirror-hint{margin-top:7px;color:#7f898f;font-size:9px;line-height:1.35}
 .mirror-actions{display:flex;gap:4px}
+
+.preview3d{position:fixed;inset:0;z-index:120;background:#090b0c;display:grid;grid-template-rows:54px minmax(0,1fr);color:#eef1f3}
+.preview3d.hidden{display:none}
+.preview3d-head{display:flex;align-items:center;gap:14px;padding:0 10px 0 16px;background:#111315;border-bottom:1px solid #2c3034;min-width:0}
+.preview3d-title{display:flex;align-items:baseline;gap:9px;min-width:max-content}.preview3d-title strong{font-size:15px}.preview3d-title small{font-size:10px;color:#8f989f}
+.preview3d-actions{display:flex;align-items:center;gap:6px;min-width:0;overflow-x:auto;scrollbar-width:none;margin-left:auto}.preview3d-actions::-webkit-scrollbar{display:none}
+.preview3d-actions button{background:#1a1d20;border:1px solid #30353a;color:#e8ecef;border-radius:5px;padding:7px 10px;cursor:pointer;white-space:nowrap}.preview3d-actions button:hover{background:#25292d;border-color:#4a5157}.preview3d-actions button.active{border-color:#5aa968;background:#18231b;color:#8dda99}
+.preview3d-actions .preview3d-close{width:34px;height:34px;padding:0;font-size:22px;margin-left:4px}
+.preview3d-stage{position:relative;min-width:0;min-height:0;overflow:hidden}.preview3d-stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;outline:none}
+.preview3d-loading{position:absolute;inset:0;z-index:8;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:#0b0d0ee8;color:#eef1f3}.preview3d-loading.hidden{display:none}.preview3d-loading small{color:#8d969d}.preview3d-spinner{width:26px;height:26px;border:3px solid #394047;border-top-color:#68c477;border-radius:50%;animation:previewspin .8s linear infinite}@keyframes previewspin{to{transform:rotate(360deg)}}
+.preview3d-hint{position:absolute;left:12px;bottom:11px;z-index:4;background:#111417df;border:1px solid #30353a;border-radius:5px;padding:6px 9px;color:#aab2b8;font-size:10px;pointer-events:none}
+@media(max-width:850px){.preview3d-head{padding-left:9px}.preview3d-title small{display:none}.preview3d-actions button{padding:6px 8px;font-size:10px}.preview3d-hint{display:none}}
