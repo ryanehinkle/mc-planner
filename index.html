@@ -14,7 +14,7 @@
     <div class="top-actions">
       <button id="newBtn">New</button><button id="importBtn">Import</button><button id="saveBtn">Save</button>
       <button id="exportBtn">Export PNG</button><button id="pdfBtn">Export PDF</button>
-      <button id="referenceBtn">Reference</button><span class="top-sep"></span>
+      <button id="referenceBtn">Reference</button><button id="preview3dBtn">3D Preview</button><span class="top-sep"></span>
       <button id="undoBtn" class="square" title="Undo">↶</button><button id="redoBtn" class="square" title="Redo">↷</button>
     </div>
     <div class="top-right"><button id="settingsBtn" class="square">⚙</button><button id="helpBtn" class="square">?</button></div>
@@ -122,9 +122,34 @@
   </div>
 </div></div>
 
+<div id="preview3dModal" class="preview3d hidden">
+  <div class="preview3d-head">
+    <div class="preview3d-title"><strong>3D Preview</strong><small id="preview3dStatus">Schem-at renderer</small></div>
+    <div class="preview3d-actions">
+      <button id="preview3dRefresh">Refresh</button>
+      <button id="preview3dPerspective">Perspective</button>
+      <button id="preview3dIso">Isometric</button>
+      <button id="preview3dFly">Fly</button>
+      <button id="preview3dSlice">Slice</button>
+      <button id="preview3dOrbit">Auto Orbit</button>
+      <button id="preview3dShot">Screenshot</button>
+      <button id="preview3dClose" class="preview3d-close">×</button>
+    </div>
+  </div>
+  <div class="preview3d-stage">
+    <canvas id="preview3dCanvas"></canvas>
+    <div id="preview3dLoading" class="preview3d-loading"><span class="preview3d-spinner"></span><b>Preparing 3D preview…</b><small>Loading Minecraft renderer and resource pack</small></div>
+    <div class="preview3d-hint">Left drag: orbit · Right drag: pan · Wheel: zoom · Use the renderer sidebar for render, capture, export and pack controls.</div>
+  </div>
+</div>
+
 <input id="fileInput" type="file" accept=".mcplan,.json,.schem,.schematic,.litematic,.litematica" hidden>
 <input id="referenceInput" type="file" accept="image/png,image/jpeg,image/webp" hidden>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script src="nbt-import.js?v=20261006-1"></script>
-<script src="app.js?v=20261006-2"></script>
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.184.0/build/three.module.js"}}
+</script>
+<script src="nbt-import.js?v=20261006-2"></script>
+<script src="app.js?v=20261006-3"></script>
+<script type="module" src="preview3d.js?v=20261006-1"></script>
 </body></html>
