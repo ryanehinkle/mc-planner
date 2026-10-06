@@ -16,7 +16,8 @@ const state={
 };
 
 function pretty(id){return id.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())}
-function texUrl(path){return RAW+path.replace(/^assets\/minecraft\/textures\/block\//,'')}
+const TRANSPARENT_TEX='data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
+function texUrl(path){if(!path)return TRANSPARENT_TEX;return RAW+path.replace(/^assets\/minecraft\/textures\/block\//,'')}
 function cellKey(x,y){return x+','+y}
 function layer(){return state.layers[state.activeLayer]}
 function snapshot(){return JSON.stringify({layers:state.layers,activeLayer:state.activeLayer,palette:state.palette})}
@@ -45,12 +46,17 @@ function guessTexture(id, textures){
 
 async function loadBlocks(){
  try{
-  const r=await fetch(TREE); if(!r.ok)throw new Error('GitHub '+r.status);
-  const j=await r.json(); const paths=j.tree.filter(x=>x.type==='blob').map(x=>x.path);
-  const texPaths=paths.filter(p=>p.startsWith('assets/minecraft/textures/block/')&&p.endsWith('.png'));
-  const textures=new Set(texPaths.map(p=>p.split('/').pop()));
-  const ids=paths.filter(p=>p.startsWith('assets/minecraft/blockstates/')&&p.endsWith('.json')).map(p=>p.split('/').pop().replace('.json','')).sort();
-  state.blocks=ids.map(id=>({id,name:pretty(id),texture:guessTexture(id,textures)}));
+  const local=await fetch('blocks.json?v=20261006-1',{cache:'no-store'});
+  if(local.ok){
+   state.blocks=await local.json();
+  }else{
+   const r=await fetch(TREE); if(!r.ok)throw new Error('GitHub '+r.status);
+   const j=await r.json(); const paths=j.tree.filter(x=>x.type==='blob').map(x=>x.path);
+   const texPaths=paths.filter(p=>p.startsWith('assets/minecraft/textures/block/')&&p.endsWith('.png'));
+   const textures=new Set(texPaths.map(p=>p.split('/').pop()));
+   const ids=paths.filter(p=>p.startsWith('assets/minecraft/blockstates/')&&p.endsWith('.json')).map(p=>p.split('/').pop().replace('.json','')).sort();
+   state.blocks=ids.map(id=>({id,name:pretty(id),texture:guessTexture(id,textures)}));
+  }
   state.blockMap=new Map(state.blocks.map(b=>[b.id,b]));
   if(!state.blockMap.has(state.current)) state.current=state.blocks[0]?.id||'stone';
   $('#loadingBlocks').classList.add('hidden'); renderBlockPicker(); updateCurrentBlock(); draw();
@@ -63,9 +69,9 @@ async function loadBlocks(){
 }
 
 function getImage(id){
- const b=state.blockMap.get(id)||{texture:id+'.png'}; const key=b.texture;
+ const b=state.blockMap.get(id)||{texture:id+'.png'}; const key=b.texture||'__transparent__';
  if(state.textureCache.has(key))return state.textureCache.get(key);
- const img=new Image(); img.crossOrigin='anonymous'; img.src=texUrl(key); img.onload=draw; img.onerror=()=>{};
+ const img=new Image(); img.crossOrigin='anonymous'; img.src=key==='__transparent__'?TRANSPARENT_TEX:texUrl(key); img.onload=draw; img.onerror=()=>{};
  state.textureCache.set(key,img); return img;
 }
 function drawTexture(img,dx,dy,s){
@@ -219,7 +225,7 @@ function setCurrent(id){if(!state.blockMap.has(id))return;state.current=id;if(!s
 function updateCurrentBlock(){const b=state.blockMap.get(state.current);if(!b)return;$('#currentBlockName').textContent=b.name;$('#currentBlockImg').src=texUrl(b.texture)}
 function countMaterials(){const m=new Map();for(const L of state.layers)for(const id of Object.values(L.cells))m.set(id,(m.get(id)||0)+1);return m}
 function renderPalette(){const m=countMaterials(),el=$('#palette');el.innerHTML='';for(const id of state.palette){const b=state.blockMap.get(id);if(!b)continue;const btn=document.createElement('button');btn.className='palette-item'+(id===state.current?' active':'');btn.title=b.name;btn.innerHTML='<img src="'+texUrl(b.texture)+'"><em>'+(m.get(id)||0)+'</em>';btn.onclick=()=>setCurrent(id);el.appendChild(btn)}}
-function renderLayers(){const el=$('#layers');el.innerHTML='';state.layers.forEach((L,i)=>{const row=document.createElement('div');row.className='layer-row'+(i===state.activeLayer?' active':'');row.innerHTML='<button title="Visibility">'+(L.visible?'◉':'○')+'</button><div class="layer-name">'+L.name+'<small> · '+Object.keys(L.cells).length+' blocks</small></div><button title="Rename">✎</button><button title="Delete">×</button>';row.onclick=()=>{state.activeLayer=i;renderLayers();draw()};row.children[0].onclick=e=>{e.stopPropagation();L.visible=!L.visible;renderLayers();draw();autosave()};row.children[2].onclick=e=>{e.stopPropagation();const n=prompt('Layer name',L.name);if(n){L.name=n;renderLayers();autosave()}};row.children[3].onclick=e=>{e.stopPropagation();if(state.layers.length===1)return;if(confirm('Delete '+L.name+'?')){pushHistory();state.layers.splice(i,1);state.activeLayer=Math.max(0,Math.min(state.activeLayer,state.layers.length-1));renderUI();draw();autosave()}};el.appendChild(row)})}
+function renderLayers(){const el=$('#layers');el.innerHTML='';state.layers.forEach((L,i)=>{const row=document.createElement('div');row.className='layer-row'+(i===state.activeLayer?' active':'');row.innerHTML='<button title="Visibility">'+(L.visible?'◉':'○')+'</button><div class="layer-name">'+L.name+'<small> · '+Object.keys(L.cells).length+' blocks</small></div><button title="Rename">✎</button><button title="Delete">×</button>';row.onclick=()=>{state.activeLayer=i;if(L.sourceY!==undefined)state.layers.forEach((x,j)=>{if(x.sourceY!==undefined)x.visible=j===i});renderLayers();draw()};row.children[0].onclick=e=>{e.stopPropagation();L.visible=!L.visible;renderLayers();draw();autosave()};row.children[2].onclick=e=>{e.stopPropagation();const n=prompt('Layer name',L.name);if(n){L.name=n;renderLayers();autosave()}};row.children[3].onclick=e=>{e.stopPropagation();if(state.layers.length===1)return;if(confirm('Delete '+L.name+'?')){pushHistory();state.layers.splice(i,1);state.activeLayer=Math.max(0,Math.min(state.activeLayer,state.layers.length-1));renderUI();draw();autosave()}};el.appendChild(row)})}
 function renderMaterials(){const m=countMaterials(),total=[...m.values()].reduce((a,b)=>a+b,0);$('#totalBlocks').textContent=total.toLocaleString()+' blocks';const el=$('#materials');el.innerHTML='';if(!total){el.innerHTML='<div class="empty">Nothing placed yet.</div>';return}for(const [id,n] of [...m].sort((a,b)=>b[1]-a[1])){const b=state.blockMap.get(id)||{name:pretty(id),texture:id+'.png'},stacks=n/64,chests=n/1728;const d=document.createElement('div');d.className='material';d.innerHTML='<img src="'+texUrl(b.texture)+'"><div><strong>'+b.name+'</strong><small>'+Math.floor(n/64)+' stacks + '+(n%64)+' · '+chests.toFixed(2)+' chests</small></div><div class="material-count">'+n.toLocaleString()+'</div>';el.appendChild(d)}}
 function renderUI(){renderPalette();renderLayers();renderMaterials();updateUndoRedo()}
 function updateUndoRedo(){$('#undoBtn').disabled=!state.history.length;$('#redoBtn').disabled=!state.future.length}
@@ -269,7 +275,33 @@ $('#clearPaletteBtn').onclick=()=>{const used=countMaterials();state.palette=sta
 $('#undoBtn').onclick=undo;$('#redoBtn').onclick=redo;
 $('#newBtn').onclick=()=>{if(!confirm('Start a new plan?'))return;pushHistory();state.layers=[{id:crypto.randomUUID(),name:'Layer 1',visible:true,cells:{}}];state.activeLayer=0;state.palette=[state.current];state.mirrorLines=[];state.mirrorHover=null;updateMirrorStatus();renderUI();draw();autosave()};
 $('#saveBtn').onclick=()=>download('mc-planner.mcplan',JSON.stringify(projectData()),'application/json');
-$('#importBtn').onclick=()=>$('#fileInput').click();$('#fileInput').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{loadProject(JSON.parse(await f.text()))}catch(err){alert('Could not open that MC Planner file.')}e.target.value=''};
+function fitImportedBuild(build){
+ const pad=70,w=Math.max(1,build.width||1),d=Math.max(1,build.depth||1);
+ const zx=Math.max(.15,(wrap.clientWidth-pad)/(state.baseCell*w)),zz=Math.max(.15,(wrap.clientHeight-pad)/(state.baseCell*d));
+ state.zoom=Math.max(.15,Math.min(2.5,zx,zz));const s=cellSize();
+ state.panX=(wrap.clientWidth-w*s)/2;state.panY=(wrap.clientHeight-d*s)/2;updateZoom();
+}
+async function importMinecraftBuild(f){
+ if(!window.MCImport)throw new Error('Minecraft import parser did not load.');
+ const loader=$('#loadingBlocks');loader.textContent='Importing '+f.name+'…';loader.classList.remove('hidden');
+ try{
+  const build=await window.MCImport.importFile(f);
+  state.layers=build.layers;state.activeLayer=0;state.palette=build.palette.filter(id=>state.blockMap.has(id));
+  if(state.palette.length)state.current=state.palette[0];
+  state.mirrorLines=[];state.mirrorHover=null;state.history=[];state.future=[];
+  fitImportedBuild(build);updateMirrorStatus();renderUI();updateCurrentBlock();draw();autosave();
+  alert('Imported '+build.format+' · '+build.width+' × '+build.height+' × '+build.depth+' · '+build.layers.length+' Y-layers');
+ }finally{loader.classList.add('hidden');loader.textContent='Loading vanilla Minecraft blocks…'}
+}
+$('#importBtn').onclick=()=>$('#fileInput').click();$('#fileInput').onchange=async e=>{
+ const f=e.target.files[0];if(!f)return;const ext=(f.name.split('.').pop()||'').toLowerCase();
+ try{
+  if(ext==='mcplan'||ext==='json')loadProject(JSON.parse(await f.text()));
+  else if(['schem','schematic','litematic','litematica'].includes(ext))await importMinecraftBuild(f);
+  else throw new Error('Unsupported import file.');
+ }catch(err){console.error(err);alert('Could not import '+f.name+': '+(err?.message||err));}
+ e.target.value='';
+};
 $('#exportBtn').onclick=exportImage;$('#pdfBtn').onclick=exportPdf;
 $('#zoomIn').onclick=()=>zoomAt(1.2);$('#zoomOut').onclick=()=>zoomAt(1/1.2);$('#zoomReset').onclick=()=>{state.zoom=1;updateZoom();draw()};
 function zoomAt(f,cx=wrap.clientWidth/2,cy=wrap.clientHeight/2){const old=cellSize(),nz=Math.max(.15,Math.min(6,state.zoom*f)),nw=state.baseCell*nz;state.panX=cx-(cx-state.panX)*(nw/old);state.panY=cy-(cy-state.panY)*(nw/old);state.zoom=nz;updateZoom();draw()}
