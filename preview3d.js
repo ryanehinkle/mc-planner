@@ -1,21 +1,16 @@
-const THREE_MODULE_URLS=[
+const THREE_URLS=[
   'https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js',
   'https://unpkg.com/three@0.184.0/build/three.module.js'
 ];
-const NUCLEATION_URLS=[
-  'https://cdn.jsdelivr.net/npm/nucleation@0.2.12/nucleation-cdn-loader.js',
-  'https://unpkg.com/nucleation@0.2.12/nucleation-cdn-loader.js'
-];
-const RENDERER_URLS=[
-  'https://cdn.jsdelivr.net/npm/schematic-renderer@1.6.1/dist/schematic-renderer.umd.js',
-  'https://unpkg.com/schematic-renderer@1.6.1/dist/schematic-renderer.umd.js'
-];
-const VANILLA_PACK_URL='https://raw.githubusercontent.com/Schem-at/schematic-renderer/master/test/public/pack.zip';
+const BLOCK_TEXTURE_ROOT='https://raw.githubusercontent.com/PixiGeko/Minecraft-default-assets/latest/assets/minecraft/textures/block/';
 
 const modal=document.getElementById('preview3dModal');
 const canvas=document.getElementById('preview3dCanvas');
+const stage=canvas?.parentElement;
 const loading=document.getElementById('preview3dLoading');
 const statusEl=document.getElementById('preview3dStatus');
+const statsEl=document.getElementById('preview3dStats');
+const hintEl=document.getElementById('preview3dHint');
 const openBtn=document.getElementById('preview3dBtn');
 const closeBtn=document.getElementById('preview3dClose');
 const refreshBtn=document.getElementById('preview3dRefresh');
@@ -25,31 +20,71 @@ const flyBtn=document.getElementById('preview3dFly');
 const sliceBtn=document.getElementById('preview3dSlice');
 const orbitBtn=document.getElementById('preview3dOrbit');
 const shotBtn=document.getElementById('preview3dShot');
+const slicePanel=document.getElementById('preview3dSlicePanel');
+const sliceRange=document.getElementById('preview3dSliceRange');
+const sliceValue=document.getElementById('preview3dSliceValue');
 
-let renderer=null;
-let api=null;
-let readyPromise=null;
-let readyResolve=null;
-let fly=false;
-let slicer=false;
-let orbit=false;
-let loadingProject=false;
+let THREE=null;
+let webgl=null;
+let scene=null;
+let perspectiveCamera=null;
+let orthoCamera=null;
+let activeCamera=null;
+let modelGroup=null;
+let grid=null;
+let catalog=null;
+let catalogPromise=null;
+let initialized=false;
+let building=false;
+let visible=false;
+let mode='perspective';
+let autoOrbit=false;
+let sliceEnabled=false;
+let slicePlane=null;
+let sliceMin=0;
+let sliceMax=0;
+let sliceY=0;
+let centerY=0;
+let boundsInfo=null;
+let animationId=0;
+let lastFrame=performance.now();
+let flyYaw=0;
+let flyPitch=0;
+let flySpeed=0.12;
+const flyKeys=new Set();
+const textureCache=new Map();
+const materialCache=new Map();
 
-function setLoading(on,title='Preparing 3D preview…',detail='Loading Minecraft renderer and resource pack'){
+const orbit={
+  target:null,
+  radius:20,
+  theta:Math.PI/4,
+  phi:Math.PI/3,
+  orthoHalf:10
+};
+const pointer={down:false,button:0,x:0,y:0,moved:false};
+
+function setLoading(on,title='Preparing 3D preview…',detail='Loading the Minecraft scene'){
+  if(!loading)return;
   loading.classList.toggle('hidden',!on);
   const b=loading.querySelector('b'),s=loading.querySelector('small');
   if(b)b.textContent=title;
   if(s)s.textContent=detail;
 }
-function setStatus(text){statusEl.textContent=text}
+function setStatus(text){if(statusEl)statusEl.textContent=text}
 function setModeButton(active){
-  [perspectiveBtn,isoBtn,flyBtn].forEach(b=>b.classList.remove('active'));
+  [perspectiveBtn,isoBtn,flyBtn].forEach(b=>b?.classList.remove('active'));
   active?.classList.add('active');
 }
-function normalizeState(id,state){
-  let s=state||('minecraft:'+id);
-  if(!s.includes(':'))s='minecraft:'+s;
-  return s;
+function parseState(state){
+  const out={};
+  const m=String(state||'').match(/\[([^\]]+)\]/);
+  if(!m)return out;
+  for(const pair of m[1].split(',')){
+    const i=pair.indexOf('=');
+    if(i>0)out[pair.slice(0,i)]=pair.slice(i+1);
+  }
+  return out;
 }
 function projectBlocks(){
   const src=window.MCPlanner3DSource?.getProject?.();
@@ -58,275 +93,495 @@ function projectBlocks(){
   src.layers.forEach((layer,i)=>{
     const y=Number.isFinite(layer.sourceY)?layer.sourceY:i;
     for(const [key,id] of Object.entries(layer.cells||{})){
+      if(!id||id==='air'||id==='cave_air'||id==='void_air')continue;
       const [x,z]=key.split(',').map(Number);
-      if(!Number.isFinite(x)||!Number.isFinite(z)||!id||id==='air')continue;
-      out.push({x,y,z,id,state:normalizeState(id,layer.states?.[key])});
+      if(!Number.isFinite(x)||!Number.isFinite(z))continue;
+      out.push({x,y,z,id,state:layer.states?.[key]||('minecraft:'+id)});
     }
   });
   return out;
 }
-async function buildWrapper(SchematicWrapper){
-  const blocks=projectBlocks();
-  if(!blocks.length)throw new Error('Place some blocks before opening the 3D preview.');
-  let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
-  for(const b of blocks){minX=Math.min(minX,b.x);minY=Math.min(minY,b.y);minZ=Math.min(minZ,b.z);maxX=Math.max(maxX,b.x);maxY=Math.max(maxY,b.y);maxZ=Math.max(maxZ,b.z)}
-  const wrapper=new SchematicWrapper();
-  const total=blocks.length;
-  for(let i=0;i<total;i++){
-    const b=blocks[i],x=b.x-minX,y=b.y-minY,z=b.z-minZ;
-    try{
-      if(b.state.includes('[')&&typeof wrapper.set_block_from_string==='function')wrapper.set_block_from_string(x,y,z,b.state);
-      else wrapper.set_block(x,y,z,b.state);
-    }catch(err){
-      console.warn('[3D Preview] Could not place block',b.state,x,y,z,err);
-      try{wrapper.set_block(x,y,z,'minecraft:'+b.id)}catch{}
-    }
-    if(i&&i%4000===0){
-      setLoading(true,'Building 3D project…',Math.round(i/total*100)+'% · '+i.toLocaleString()+' / '+total.toLocaleString()+' blocks');
-      await new Promise(requestAnimationFrame);
-    }
-  }
-  return{wrapper,count:total,size:[maxX-minX+1,maxY-minY+1,maxZ-minZ+1]};
-}
-function loadScript(src){
-  return new Promise((resolve,reject)=>{
-    const existing=[...document.scripts].find(s=>s.src===src);
-    if(existing){
-      if(existing.dataset.loaded==='1')return resolve();
-      existing.addEventListener('load',()=>resolve(),{once:true});
-      existing.addEventListener('error',()=>reject(new Error('Failed to load '+src)),{once:true});
-      return;
-    }
-    let runtimeError=null;
-    const onRuntimeError=e=>{
-      if(!e.filename||e.filename===src||e.filename.includes(new URL(src).hostname)){
-        runtimeError=e.error||new Error(e.message||'Script execution failed');
-      }
-    };
-    window.addEventListener('error',onRuntimeError);
-    const s=document.createElement('script');
-    s.src=src;s.async=true;s.crossOrigin='anonymous';
-    s.onload=()=>{
-      window.removeEventListener('error',onRuntimeError);
-      s.dataset.loaded='1';
-      if(runtimeError)reject(runtimeError);else resolve();
-    };
-    s.onerror=()=>{
-      window.removeEventListener('error',onRuntimeError);
-      s.remove();
-      reject(new Error('Failed to load '+src));
-    };
-    document.head.appendChild(s);
-  });
-}
-async function loadFirst(urls,test,label){
-  if(test())return;
-  let lastErr=null;
-  for(const url of urls){
-    try{
-      setStatus('Loading '+label+'…');
-      await loadScript(url);
-      if(test())return;
-      lastErr=new Error(label+' loaded but did not expose its browser API');
-    }catch(err){lastErr=err}
-  }
-  throw lastErr||new Error('Could not load '+label);
-}
 async function loadThree(){
-  if(window.THREE?.Object3D&&window.THREE?.REVISION)return window.THREE;
+  if(THREE)return THREE;
   let lastErr=null;
-  for(const url of THREE_MODULE_URLS){
+  for(const url of THREE_URLS){
     try{
-      setStatus('Loading Three.js 0.184…');
+      setStatus('Loading 3D engine…');
       const mod=await import(url);
-      if(!mod?.Object3D||!mod?.Scene||!mod?.WebGLRenderer)throw new Error('Three.js module is incomplete');
-      window.THREE=mod;
-      return mod;
+      if(!mod?.WebGLRenderer||!mod?.Scene||!mod?.InstancedMesh)throw new Error('Incomplete Three.js module');
+      THREE=mod;
+      return THREE;
     }catch(err){lastErr=err}
   }
-  throw new Error('Could not load Three.js 0.184: '+(lastErr?.message||lastErr));
+  throw new Error('Could not load Three.js: '+(lastErr?.message||lastErr));
 }
-
-async function loadNucleation(){
-  if(window.Nucleation?.SchematicWrapper)return window.Nucleation;
-  let lastErr=null;
-  for(const url of NUCLEATION_URLS){
-    try{
-      setStatus('Loading Minecraft schematic engine…');
-      const mod=await import(url);
-      const init=mod.default||mod.init;
-      if(typeof init==='function')await init();
-      if(!mod.SchematicWrapper)throw new Error('Nucleation module is missing SchematicWrapper');
-      window.Nucleation=mod;
-      return mod;
-    }catch(err){lastErr=err}
-  }
-  throw new Error('Could not load Nucleation: '+(lastErr?.message||lastErr));
+async function loadCatalog(){
+  if(catalog)return catalog;
+  if(catalogPromise)return catalogPromise;
+  catalogPromise=fetch('blocks.json?v=20261006-1',{cache:'force-cache'})
+    .then(r=>{if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+    .then(rows=>{
+      catalog=new Map(rows.map(b=>[b.id,b.texture]));
+      return catalog;
+    })
+    .catch(err=>{
+      console.warn('[3D Preview] Block catalog unavailable',err);
+      catalog=new Map();
+      return catalog;
+    });
+  return catalogPromise;
 }
-function getRendererNamespace(){
-  const g=window.SchematicRenderer;
-  if(g&&typeof g.SchematicRenderer==='function')return g;
-  if(typeof g==='function')return {SchematicRenderer:g,...(window.Nucleation||{})};
-  for(const key of Object.keys(window)){
-    const v=window[key];
-    if(v&&typeof v==='object'&&typeof v.SchematicRenderer==='function')return v;
-  }
-  return null;
+function textureNameFor(id){
+  if(id==='water'||id==='bubble_column')return 'water_still.png';
+  if(id==='lava')return 'lava_still.png';
+  return catalog?.get(id)||null;
 }
-
-async function initRenderer(){
-  if(renderer)return renderer;
-  if(readyPromise)return readyPromise;
-  setLoading(true);
-  setStatus('Loading Schem-at renderer…');
-  readyPromise=new Promise((resolve,reject)=>{
-    readyResolve=resolve;
-    setTimeout(()=>reject(new Error('3D renderer initialization timed out. Check WebGL/browser support.')),45000);
-  });
-  try{
-    await loadThree();
-    await loadNucleation();
-    await loadFirst(RENDERER_URLS,()=>!!getRendererNamespace(),'Schem-at renderer');
-    const rendererApi=getRendererNamespace();
-    if(!rendererApi)throw new Error('Schem-at renderer browser API was not found after loading');
-    api={...(window.Nucleation||{}),...rendererApi};
-  }catch(err){
-    readyPromise=null;
-    throw new Error('Could not load the 3D renderer: '+(err?.message||err));
-  }
-  const {SchematicRenderer}=api;
-  renderer=new SchematicRenderer(
-    canvas,
-    {},
-    {
-      vanillaPack:async()=>{
-        setLoading(true,'Loading vanilla resource pack…','One-time 3D texture/model load');
-        const packUrls=[
-          VANILLA_PACK_URL,
-          'https://cdn.jsdelivr.net/gh/Schem-at/schematic-renderer@master/test/public/pack.zip'
-        ];
-        let lastErr=null;
-        for(const url of packUrls){
-          try{
-            const r=await fetch(url);
-            if(!r.ok)throw new Error('HTTP '+r.status);
-            return new Blob([await r.arrayBuffer()],{type:'application/zip'});
-          }catch(err){lastErr=err}
-        }
-        throw new Error('Could not load vanilla 3D resource pack: '+(lastErr?.message||lastErr));
+function styleFor(id){
+  if(/glass|ice|water|bubble_column/.test(id))return 'transparent';
+  if(/leaves|sapling|flower|grass|fern|vine|roots|mushroom|azalea|torch|rail|redstone_wire|crop|wheat|carrots|potatoes|beetroots|seagrass|kelp|cactus_flower|bush|lily|orchid|tulip|dandelion|poppy/.test(id))return 'cutout';
+  return 'solid';
+}
+async function textureFor(name){
+  if(!name)return null;
+  if(textureCache.has(name))return textureCache.get(name);
+  const promise=new Promise(resolve=>{
+    const loader=new THREE.TextureLoader();
+    loader.setCrossOrigin('anonymous');
+    loader.load(BLOCK_TEXTURE_ROOT+name,tex=>{
+      tex.colorSpace=THREE.SRGBColorSpace;
+      tex.magFilter=THREE.NearestFilter;
+      tex.minFilter=THREE.NearestFilter;
+      tex.generateMipmaps=false;
+      tex.wrapS=THREE.ClampToEdgeWrapping;
+      tex.wrapT=THREE.ClampToEdgeWrapping;
+      const img=tex.image;
+      if(img&&img.width&&img.height>img.width){
+        const f=img.width/img.height;
+        tex.repeat.set(1,f);
+        tex.offset.set(0,1-f);
       }
-    },
-    {
-      backgroundColor:0x0b0d0e,
-      gamma:0.5,
-      showGrid:true,
-      showAxes:false,
-      enableInteraction:true,
-      enableDragAndDrop:false,
-      enableGizmos:false,
-      singleSchematicMode:true,
-      enableProgressBar:true,
-      enableAnimatedTextures:true,
-      enableAdaptiveFPS:true,
-      targetFPS:60,
-      idleFPS:1,
-      cameraOptions:{useTightBounds:true,enableZoomInOnLoad:true,autoOrbitAfterZoom:false},
-      interactionOptions:{enableSelection:false,enableMovingSchematics:false,enableBlockSelection:false},
-      postProcessingOptions:{enabled:true,enableSSAO:true,enableSMAA:true,enableGamma:true},
-      wasmMeshBuilderOptions:{enabled:true,greedyMeshingEnabled:false,maxWorkers:0},
-      resourcePackOptions:{autoRebuild:true,showMissingPackNotice:false},
-      sidebarOptions:{
-        enabled:true,
-        position:'right',
-        width:320,
-        collapsedByDefault:true,
-        hiddenByDefault:false,
-        defaultTab:'renderSettings',
-        disabledTabs:['performance']
-      },
-      callbacks:{
-        onRendererInitialized:(r)=>{
-          setStatus('Renderer ready');
-          readyResolve?.(r);
-        },
-        onSchematicRendered:()=>setLoading(false),
-        onSchematicLoaded:()=>setStatus('3D project loaded')
+      tex.needsUpdate=true;
+      resolve(tex);
+    },undefined,()=>resolve(null));
+  });
+  textureCache.set(name,promise);
+  return promise;
+}
+async function materialFor(textureName,style){
+  const key=(textureName||'none')+'|'+style;
+  if(materialCache.has(key))return materialCache.get(key);
+  const tex=await textureFor(textureName);
+  const opts={
+    map:tex||null,
+    color:tex?0xffffff:0x8a8f93,
+    roughness:0.82,
+    metalness:0.0
+  };
+  if(style==='transparent'){
+    opts.transparent=true;
+    opts.opacity=0.62;
+    opts.depthWrite=false;
+    opts.alphaTest=0.02;
+  }else if(style==='cutout'){
+    opts.transparent=false;
+    opts.alphaTest=0.35;
+    opts.side=THREE.DoubleSide;
+  }else{
+    opts.alphaTest=0.06;
+  }
+  const mat=new THREE.MeshStandardMaterial(opts);
+  mat.clippingPlanes=sliceEnabled?[slicePlane]:null;
+  mat.clipShadows=false;
+  materialCache.set(key,mat);
+  return mat;
+}
+function stairParts(props){
+  const top=props.half==='top';
+  const facing=props.facing||'north';
+  const lowY=top?.25:-.25;
+  const highY=top?-.25:.25;
+  const parts=[{sx:1,sy:.5,sz:1,ox:0,oy:lowY,oz:0}];
+  if(facing==='east')parts.push({sx:.5,sy:.5,sz:1,ox:.25,oy:highY,oz:0});
+  else if(facing==='west')parts.push({sx:.5,sy:.5,sz:1,ox:-.25,oy:highY,oz:0});
+  else if(facing==='south')parts.push({sx:1,sy:.5,sz:.5,ox:0,oy:highY,oz:.25});
+  else parts.push({sx:1,sy:.5,sz:.5,ox:0,oy:highY,oz:-.25});
+  return parts;
+}
+function partsForBlock(id,state){
+  const p=parseState(state);
+  if(id.endsWith('_slab')){
+    if(p.type==='double')return[{sx:1,sy:1,sz:1,ox:0,oy:0,oz:0}];
+    return[{sx:1,sy:.5,sz:1,ox:0,oy:p.type==='top'?.25:-.25,oz:0}];
+  }
+  if(id.endsWith('_stairs'))return stairParts(p);
+  if(id.endsWith('_carpet'))return[{sx:1,sy:.0625,sz:1,ox:0,oy:-.46875,oz:0}];
+  if(id.includes('pressure_plate'))return[{sx:.875,sy:.0625,sz:.875,ox:0,oy:-.46875,oz:0}];
+  if(id==='snow'){
+    const h=Math.max(1,Math.min(8,Number(p.layers)||1))/8;
+    return[{sx:1,sy:h,sz:1,ox:0,oy:-.5+h/2,oz:0}];
+  }
+  if(id.endsWith('_trapdoor')||id==='iron_trapdoor'){
+    const t=.1875;
+    if(p.open==='true'){
+      if(p.facing==='east')return[{sx:t,sy:1,sz:1,ox:.5-t/2,oy:0,oz:0}];
+      if(p.facing==='west')return[{sx:t,sy:1,sz:1,ox:-.5+t/2,oy:0,oz:0}];
+      if(p.facing==='south')return[{sx:1,sy:1,sz:t,ox:0,oy:0,oz:.5-t/2}];
+      return[{sx:1,sy:1,sz:t,ox:0,oy:0,oz:-.5+t/2}];
+    }
+    return[{sx:1,sy:t,sz:1,ox:0,oy:p.half==='top'?.5-t/2:-.5+t/2,oz:0}];
+  }
+  if(id.endsWith('_door')||id==='iron_door'){
+    const t=.1875,f=p.facing||'north';
+    if(f==='east')return[{sx:t,sy:1,sz:1,ox:.5-t/2,oy:0,oz:0}];
+    if(f==='west')return[{sx:t,sy:1,sz:1,ox:-.5+t/2,oy:0,oz:0}];
+    if(f==='south')return[{sx:1,sy:1,sz:t,ox:0,oy:0,oz:.5-t/2}];
+    return[{sx:1,sy:1,sz:t,ox:0,oy:0,oz:-.5+t/2}];
+  }
+  if(id.endsWith('_pane')||id==='iron_bars'){
+    return[
+      {sx:.125,sy:1,sz:1,ox:0,oy:0,oz:0},
+      {sx:1,sy:1,sz:.125,ox:0,oy:0,oz:0}
+    ];
+  }
+  if(id.endsWith('_fence')||id.endsWith('_wall')){
+    return[
+      {sx:.25,sy:1,sz:.25,ox:0,oy:0,oz:0},
+      {sx:1,sy:.14,sz:.14,ox:0,oy:.15,oz:0},
+      {sx:1,sy:.14,sz:.14,ox:0,oy:-.18,oz:0},
+      {sx:.14,sy:.14,sz:1,ox:0,oy:.15,oz:0},
+      {sx:.14,sy:.14,sz:1,ox:0,oy:-.18,oz:0}
+    ];
+  }
+  if(/torch|sapling|flower|mushroom|bush|roots|fern|grass$/.test(id)){
+    return[{sx:.3,sy:.72,sz:.3,ox:0,oy:-.14,oz:0}];
+  }
+  return[{sx:1,sy:1,sz:1,ox:0,oy:0,oz:0}];
+}
+function clearModel(){
+  if(!modelGroup)return;
+  scene.remove(modelGroup);
+  modelGroup.traverse(o=>{
+    if(o.geometry&&o.geometry!==unitGeometry)o.geometry.dispose?.();
+  });
+  modelGroup.clear();
+  modelGroup=null;
+  if(grid){scene.remove(grid);grid.geometry?.dispose?.();grid.material?.dispose?.();grid=null}
+}
+let unitGeometry=null;
+async function buildScene(){
+  if(building)return;
+  building=true;
+  try{
+    await init3D();
+    await loadCatalog();
+    const blocks=projectBlocks();
+    if(!blocks.length)throw new Error('Place or import some blocks before opening the 3D preview.');
+    setLoading(true,'Building 3D preview…',blocks.length.toLocaleString()+' blocks');
+
+    let minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+    for(const b of blocks){
+      minX=Math.min(minX,b.x);minY=Math.min(minY,b.y);minZ=Math.min(minZ,b.z);
+      maxX=Math.max(maxX,b.x);maxY=Math.max(maxY,b.y);maxZ=Math.max(maxZ,b.z);
+    }
+    const cx=(minX+maxX+1)/2,cy=(minY+maxY+1)/2,cz=(minZ+maxZ+1)/2;
+    centerY=cy;
+    sliceMin=minY;sliceMax=maxY;sliceY=maxY;
+    boundsInfo={minX,minY,minZ,maxX,maxY,maxZ,width:maxX-minX+1,height:maxY-minY+1,depth:maxZ-minZ+1};
+
+    clearModel();
+    modelGroup=new THREE.Group();
+    modelGroup.name='MCPlannerBuild';
+    scene.add(modelGroup);
+
+    const groups=new Map();
+    for(let i=0;i<blocks.length;i++){
+      const b=blocks[i],texture=textureNameFor(b.id),style=styleFor(b.id),key=(texture||'none')+'|'+style;
+      if(!groups.has(key))groups.set(key,{texture,style,parts:[]});
+      const g=groups.get(key);
+      for(const part of partsForBlock(b.id,b.state)){
+        g.parts.push({
+          x:b.x+.5-cx+part.ox,
+          y:b.y+.5-cy+part.oy,
+          z:b.z+.5-cz+part.oz,
+          sx:part.sx,sy:part.sy,sz:part.sz
+        });
+      }
+      if(i&&i%12000===0){
+        setLoading(true,'Building 3D preview…',Math.round(i/blocks.length*100)+'% · '+i.toLocaleString()+' / '+blocks.length.toLocaleString());
+        await new Promise(requestAnimationFrame);
       }
     }
-  );
-  canvas.schematicRenderer=renderer;
-  window.mcPlanner3DRenderer=renderer;
-  try{return await readyPromise}
-  catch(err){readyPromise=null;renderer=null;api=null;throw err}
-}
-async function loadCurrentProject(){
-  if(loadingProject)return;
-  loadingProject=true;
-  try{
-    const r=await initRenderer();
-    const SchematicWrapper=api?.SchematicWrapper||window.Nucleation?.SchematicWrapper;
-    if(!SchematicWrapper)throw new Error('Minecraft schematic engine is unavailable.');
-    setLoading(true,'Building 3D project…','Converting planner layers into a Minecraft schematic');
-    setStatus('Building current project…');
-    const built=await buildWrapper(SchematicWrapper);
-    await r.schematicManager.removeAllSchematics();
-    await r.schematicManager.loadSchematic('MC Planner',built.wrapper,{focused:true});
-    r.cameraManager.focusOnSchematics();
-    r.invalidate?.();
-    setStatus(built.count.toLocaleString()+' blocks · '+built.size.join(' × '));
+
+    const entries=[...groups.values()];
+    for(let gi=0;gi<entries.length;gi++){
+      const g=entries[gi];
+      setLoading(true,'Loading block textures…',(gi+1)+' / '+entries.length);
+      const mat=await materialFor(g.texture,g.style);
+      const mesh=new THREE.InstancedMesh(unitGeometry,mat,g.parts.length);
+      mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+      const q=new THREE.Quaternion(),m=new THREE.Matrix4(),pos=new THREE.Vector3(),scale=new THREE.Vector3();
+      for(let i=0;i<g.parts.length;i++){
+        const p=g.parts[i];
+        pos.set(p.x,p.y,p.z);scale.set(p.sx,p.sy,p.sz);m.compose(pos,q,scale);mesh.setMatrixAt(i,m);
+      }
+      mesh.instanceMatrix.needsUpdate=true;
+      mesh.castShadow=false;mesh.receiveShadow=false;
+      modelGroup.add(mesh);
+    }
+
+    const size=Math.max(boundsInfo.width,boundsInfo.depth,8);
+    const divisions=Math.min(160,Math.max(8,Math.ceil(size)));
+    grid=new THREE.GridHelper(size*1.6,divisions,0x526a58,0x252b2f);
+    grid.position.y=-boundsInfo.height/2-.502;
+    grid.material.transparent=true;grid.material.opacity=.62;
+    scene.add(grid);
+
+    const diag=Math.sqrt(boundsInfo.width**2+boundsInfo.height**2+boundsInfo.depth**2);
+    orbit.target.set(0,0,0);
+    orbit.radius=Math.max(6,diag*1.15);
+    orbit.theta=Math.PI/4;
+    orbit.phi=Math.PI/3.05;
+    orbit.orthoHalf=Math.max(3,Math.max(boundsInfo.width,boundsInfo.depth,boundsInfo.height)*.72);
+    flySpeed=Math.max(.08,diag*.006);
+    setupSliceUI();
+    setPerspective(true);
+    if(statsEl)statsEl.textContent=blocks.length.toLocaleString()+' blocks · '+boundsInfo.width+' × '+boundsInfo.height+' × '+boundsInfo.depth;
+    setStatus(blocks.length.toLocaleString()+' blocks · '+boundsInfo.width+' × '+boundsInfo.height+' × '+boundsInfo.depth);
     setLoading(false);
-    setModeButton(perspectiveBtn);
-    fly=false;flyBtn.classList.remove('active');
+    render();
+  }finally{building=false}
+}
+async function init3D(){
+  if(initialized)return;
+  await loadThree();
+  setLoading(true,'Starting 3D engine…','Setting up WebGL');
+  try{
+    webgl=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false,preserveDrawingBuffer:true,powerPreference:'high-performance'});
   }catch(err){
-    console.error('[3D Preview]',err);
-    setLoading(true,'Could not render 3D preview',err?.message||String(err));
-    setStatus('Preview error');
-  }finally{loadingProject=false}
+    throw new Error('WebGL could not start: '+(err?.message||err));
+  }
+  webgl.setPixelRatio(Math.min(devicePixelRatio||1,2));
+  webgl.outputColorSpace=THREE.SRGBColorSpace;
+  webgl.toneMapping=THREE.ACESFilmicToneMapping;
+  webgl.toneMappingExposure=1.08;
+  webgl.localClippingEnabled=true;
+
+  scene=new THREE.Scene();
+  scene.background=new THREE.Color(0x0b0d0e);
+  scene.fog=new THREE.FogExp2(0x0b0d0e,.003);
+
+  perspectiveCamera=new THREE.PerspectiveCamera(50,1,.05,100000);
+  orthoCamera=new THREE.OrthographicCamera(-10,10,10,-10,-100000,100000);
+  activeCamera=perspectiveCamera;
+  orbit.target=new THREE.Vector3();
+
+  const hemi=new THREE.HemisphereLight(0xffffff,0x39424a,2.25);
+  scene.add(hemi);
+  const sun=new THREE.DirectionalLight(0xffffff,2.35);
+  sun.position.set(18,30,12);
+  scene.add(sun);
+  const fill=new THREE.DirectionalLight(0x9ab8ff,.65);
+  fill.position.set(-18,10,-20);
+  scene.add(fill);
+
+  slicePlane=new THREE.Plane(new THREE.Vector3(0,-1,0),99999);
+  unitGeometry=new THREE.BoxGeometry(1,1,1);
+  bindControls();
+  resize3D();
+  initialized=true;
+  lastFrame=performance.now();
+  animationId=requestAnimationFrame(frame);
+}
+function cameraFromOrbit(){
+  const r=orbit.radius,sp=Math.sin(orbit.phi);
+  const x=orbit.target.x+r*sp*Math.sin(orbit.theta);
+  const y=orbit.target.y+r*Math.cos(orbit.phi);
+  const z=orbit.target.z+r*sp*Math.cos(orbit.theta);
+  activeCamera.position.set(x,y,z);
+  activeCamera.lookAt(orbit.target);
+  activeCamera.updateMatrixWorld();
+}
+function updateOrthoFrustum(){
+  if(!orthoCamera||!stage)return;
+  const aspect=Math.max(.01,stage.clientWidth/Math.max(1,stage.clientHeight));
+  orthoCamera.left=-orbit.orthoHalf*aspect;
+  orthoCamera.right=orbit.orthoHalf*aspect;
+  orthoCamera.top=orbit.orthoHalf;
+  orthoCamera.bottom=-orbit.orthoHalf;
+  orthoCamera.updateProjectionMatrix();
+}
+function setPerspective(refocus=false){
+  mode='perspective';activeCamera=perspectiveCamera;
+  if(refocus&&boundsInfo){
+    const d=Math.sqrt(boundsInfo.width**2+boundsInfo.height**2+boundsInfo.depth**2);
+    orbit.radius=Math.max(6,d*1.15);orbit.theta=Math.PI/4;orbit.phi=Math.PI/3.05;orbit.target.set(0,0,0);
+  }
+  perspectiveCamera.aspect=Math.max(.01,stage.clientWidth/Math.max(1,stage.clientHeight));
+  perspectiveCamera.updateProjectionMatrix();cameraFromOrbit();setModeButton(perspectiveBtn);
+  if(hintEl)hintEl.textContent='Left drag: orbit · Right drag: pan · Wheel: zoom';
+}
+function setIsometric(){
+  mode='isometric';activeCamera=orthoCamera;
+  orbit.theta=Math.PI/4;orbit.phi=Math.acos(1/Math.sqrt(3));
+  updateOrthoFrustum();cameraFromOrbit();setModeButton(isoBtn);
+  if(hintEl)hintEl.textContent='Left drag: orbit · Right drag: pan · Wheel: zoom';
+}
+function enterFly(){
+  mode='fly';activeCamera=perspectiveCamera;
+  perspectiveCamera.aspect=Math.max(.01,stage.clientWidth/Math.max(1,stage.clientHeight));
+  perspectiveCamera.updateProjectionMatrix();
+  const dir=new THREE.Vector3();perspectiveCamera.getWorldDirection(dir);
+  flyPitch=Math.asin(Math.max(-1,Math.min(1,dir.y)));
+  flyYaw=Math.atan2(dir.x,dir.z);
+  setModeButton(flyBtn);
+  if(hintEl)hintEl.textContent='Fly: drag to look · W/S forward/back · A/D strafe · Q/E down/up · Shift faster';
+}
+function exitFly(){
+  const dir=flyDirection();
+  orbit.target.copy(perspectiveCamera.position).addScaledVector(dir,Math.max(2,orbit.radius*.35));
+  orbit.radius=perspectiveCamera.position.distanceTo(orbit.target);
+  mode='perspective';activeCamera=perspectiveCamera;cameraFromOrbit();setModeButton(perspectiveBtn);
+  if(hintEl)hintEl.textContent='Left drag: orbit · Right drag: pan · Wheel: zoom';
+}
+function flyDirection(){
+  const cp=Math.cos(flyPitch);
+  return new THREE.Vector3(Math.sin(flyYaw)*cp,Math.sin(flyPitch),Math.cos(flyYaw)*cp).normalize();
+}
+function applyFlyLook(){
+  const d=flyDirection();
+  perspectiveCamera.lookAt(perspectiveCamera.position.clone().add(d));
+  perspectiveCamera.updateMatrixWorld();
+}
+function panBy(dx,dy){
+  const right=new THREE.Vector3().setFromMatrixColumn(activeCamera.matrixWorld,0);
+  const up=new THREE.Vector3().setFromMatrixColumn(activeCamera.matrixWorld,1);
+  const scale=mode==='isometric'
+    ? (orbit.orthoHalf*2/Math.max(1,stage.clientHeight))
+    : (orbit.radius*Math.tan(THREE.MathUtils.degToRad(perspectiveCamera.fov*.5))*2/Math.max(1,stage.clientHeight));
+  orbit.target.addScaledVector(right,-dx*scale).addScaledVector(up,dy*scale);
+  cameraFromOrbit();
+}
+function bindControls(){
+  canvas.addEventListener('contextmenu',e=>e.preventDefault());
+  canvas.addEventListener('pointerdown',e=>{
+    pointer.down=true;pointer.button=e.button;pointer.x=e.clientX;pointer.y=e.clientY;pointer.moved=false;
+    canvas.setPointerCapture?.(e.pointerId);
+  });
+  canvas.addEventListener('pointermove',e=>{
+    if(!pointer.down)return;
+    const dx=e.clientX-pointer.x,dy=e.clientY-pointer.y;pointer.x=e.clientX;pointer.y=e.clientY;
+    if(Math.abs(dx)+Math.abs(dy)>1)pointer.moved=true;
+    if(mode==='fly'){
+      flyYaw-=dx*.0052;flyPitch=Math.max(-1.54,Math.min(1.54,flyPitch-dy*.0052));applyFlyLook();return;
+    }
+    if(pointer.button===2||e.shiftKey){
+      panBy(dx,dy);return;
+    }
+    orbit.theta-=dx*.008;
+    orbit.phi=Math.max(.05,Math.min(Math.PI-.05,orbit.phi-dy*.008));
+    cameraFromOrbit();
+  });
+  const end=e=>{pointer.down=false;try{canvas.releasePointerCapture?.(e.pointerId)}catch{}};
+  canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);
+  canvas.addEventListener('wheel',e=>{
+    e.preventDefault();
+    if(mode==='isometric'){
+      orbit.orthoHalf=Math.max(.35,Math.min(5000,orbit.orthoHalf*Math.exp(e.deltaY*.001)));
+      updateOrthoFrustum();
+    }else if(mode!=='fly'){
+      orbit.radius=Math.max(.6,Math.min(50000,orbit.radius*Math.exp(e.deltaY*.001)));
+      cameraFromOrbit();
+    }else{
+      flySpeed=Math.max(.01,Math.min(100,flySpeed*Math.exp(-e.deltaY*.001)));
+    }
+  },{passive:false});
+}
+function setupSliceUI(){
+  if(!sliceRange)return;
+  sliceRange.min=String(sliceMin);sliceRange.max=String(sliceMax);sliceRange.value=String(sliceMax);
+  sliceY=sliceMax;updateSlicePlane();
+}
+function updateSlicePlane(){
+  if(!slicePlane)return;
+  slicePlane.constant=sliceY+1-centerY;
+  if(sliceValue)sliceValue.textContent=sliceEnabled?'Y ≤ '+sliceY:'All layers';
+  for(const mat of materialCache.values()){
+    mat.clippingPlanes=sliceEnabled?[slicePlane]:null;
+    mat.needsUpdate=true;
+  }
+}
+function toggleSlice(){
+  sliceEnabled=!sliceEnabled;
+  slicePanel?.classList.toggle('hidden',!sliceEnabled);
+  sliceBtn?.classList.toggle('active',sliceEnabled);
+  if(sliceEnabled){sliceY=Number(sliceRange.value)||sliceMax}
+  updateSlicePlane();
+}
+function resize3D(){
+  if(!webgl||!stage)return;
+  const w=Math.max(1,stage.clientWidth),h=Math.max(1,stage.clientHeight);
+  webgl.setSize(w,h,false);
+  perspectiveCamera.aspect=w/h;perspectiveCamera.updateProjectionMatrix();
+  updateOrthoFrustum();
+}
+function render(){if(webgl&&scene&&activeCamera)webgl.render(scene,activeCamera)}
+function frame(now){
+  const dt=Math.min(.05,Math.max(0,(now-lastFrame)/1000));lastFrame=now;
+  if(visible&&initialized){
+    if(autoOrbit&&mode!=='fly'){orbit.theta+=dt*.28;cameraFromOrbit()}
+    if(mode==='fly'&&flyKeys.size){
+      const d=flyDirection(),right=new THREE.Vector3().crossVectors(d,new THREE.Vector3(0,1,0)).normalize();
+      const up=new THREE.Vector3(0,1,0),move=new THREE.Vector3();
+      if(flyKeys.has('KeyW'))move.add(d);if(flyKeys.has('KeyS'))move.sub(d);
+      if(flyKeys.has('KeyD'))move.add(right);if(flyKeys.has('KeyA'))move.sub(right);
+      if(flyKeys.has('KeyE'))move.add(up);if(flyKeys.has('KeyQ'))move.sub(up);
+      if(move.lengthSq()){move.normalize().multiplyScalar(flySpeed*dt*60*(flyKeys.has('ShiftLeft')||flyKeys.has('ShiftRight')?3:1));perspectiveCamera.position.add(move);applyFlyLook()}
+    }
+    render();
+  }
+  animationId=requestAnimationFrame(frame);
 }
 async function openPreview(){
-  modal.classList.remove('hidden');
-  document.body.classList.add('preview3d-open');
-  await loadCurrentProject();
+  modal.classList.remove('hidden');document.body.classList.add('preview3d-open');visible=true;
+  setLoading(true);
+  try{await buildScene()}
+  catch(err){console.error('[3D Preview]',err);setLoading(true,'Could not render 3D preview',err?.message||String(err));setStatus('Preview error')}
 }
 function closePreview(){
-  modal.classList.add('hidden');
-  document.body.classList.remove('preview3d-open');
-  if(renderer){
-    renderer.setAutoOrbit?.(false);orbit=false;orbitBtn.classList.remove('active');
-    renderer.cameraManager?.disableFlyControls?.();fly=false;flyBtn.classList.remove('active');
-  }
+  modal.classList.add('hidden');document.body.classList.remove('preview3d-open');visible=false;
+  flyKeys.clear();if(mode==='fly')exitFly();
 }
+async function refreshPreview(){
+  try{await buildScene()}catch(err){console.error(err);setLoading(true,'Could not refresh 3D preview',err?.message||String(err))}
+}
+async function screenshot(){
+  if(!webgl)return;
+  render();
+  shotBtn.disabled=true;
+  try{
+    const blob=await new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Screenshot failed')),'image/png'));
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='mc-planner-3d.png';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  }catch(err){alert('Could not save screenshot: '+(err?.message||err))}
+  finally{shotBtn.disabled=false}
+}
+
 openBtn?.addEventListener('click',openPreview);
 closeBtn?.addEventListener('click',closePreview);
-refreshBtn?.addEventListener('click',loadCurrentProject);
-perspectiveBtn?.addEventListener('click',()=>{
-  if(!renderer)return;renderer.cameraManager.disableFlyControls?.();fly=false;
-  renderer.cameraManager.switchCameraPreset('perspective');renderer.cameraManager.focusOnSchematics();
-  setModeButton(perspectiveBtn);
-});
-isoBtn?.addEventListener('click',()=>{
-  if(!renderer)return;renderer.cameraManager.disableFlyControls?.();fly=false;
-  renderer.cameraManager.switchCameraPreset('isometric');renderer.cameraManager.focusOnSchematics();
-  setModeButton(isoBtn);
-});
-flyBtn?.addEventListener('click',()=>{
-  if(!renderer)return;fly=!fly;
-  if(fly){renderer.cameraManager.switchCameraPreset('perspective_fpv');renderer.cameraManager.enableFlyControls();setModeButton(flyBtn)}
-  else{renderer.cameraManager.disableFlyControls();renderer.cameraManager.switchCameraPreset('perspective');renderer.cameraManager.focusOnSchematics();setModeButton(perspectiveBtn)}
-});
-sliceBtn?.addEventListener('click',()=>{
-  if(!renderer)return;renderer.toggleSlicerOverlay();slicer=!slicer;sliceBtn.classList.toggle('active',slicer);
-});
-orbitBtn?.addEventListener('click',()=>{
-  if(!renderer)return;orbit=!orbit;renderer.setAutoOrbit(orbit);orbitBtn.classList.toggle('active',orbit);
-});
-shotBtn?.addEventListener('click',async()=>{
-  if(!renderer)return;
-  shotBtn.disabled=true;
-  try{await renderer.downloadScreenshot('mc-planner-3d',{format:'image/png',width:1920,height:1080})}
-  finally{shotBtn.disabled=false}
-});
+refreshBtn?.addEventListener('click',refreshPreview);
+perspectiveBtn?.addEventListener('click',()=>{if(initialized){if(mode==='fly')exitFly();else setPerspective(false)}});
+isoBtn?.addEventListener('click',()=>{if(initialized){if(mode==='fly')exitFly();setIsometric()}});
+flyBtn?.addEventListener('click',()=>{if(!initialized)return;if(mode==='fly')exitFly();else enterFly()});
+sliceBtn?.addEventListener('click',()=>{if(initialized)toggleSlice()});
+orbitBtn?.addEventListener('click',()=>{autoOrbit=!autoOrbit;orbitBtn.classList.toggle('active',autoOrbit)});
+shotBtn?.addEventListener('click',screenshot);
+sliceRange?.addEventListener('input',()=>{sliceY=Number(sliceRange.value);updateSlicePlane()});
+
 window.addEventListener('keydown',e=>{
-  if(e.key==='Escape'&&!modal.classList.contains('hidden')){e.stopPropagation();closePreview()}
+  if(!visible)return;
+  if(e.key==='Escape'){e.preventDefault();closePreview();return}
+  if(mode==='fly'&&['KeyW','KeyA','KeyS','KeyD','KeyQ','KeyE','ShiftLeft','ShiftRight'].includes(e.code)){flyKeys.add(e.code);e.preventDefault()}
 },{capture:true});
-window.addEventListener('resize',()=>{if(renderer&&!modal.classList.contains('hidden'))renderer.invalidate?.()});
+window.addEventListener('keyup',e=>flyKeys.delete(e.code),{capture:true});
+window.addEventListener('blur',()=>flyKeys.clear());
+window.addEventListener('resize',()=>{if(initialized){resize3D();render()}});
+if(typeof ResizeObserver!=='undefined'&&stage)new ResizeObserver(()=>{if(initialized){resize3D();render()}}).observe(stage);
