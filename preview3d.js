@@ -1,4 +1,11 @@
-const RENDERER_URL='https://unpkg.com/schematic-renderer@1.6.1/dist/schematic-renderer.es.js';
+const THREE_URLS=[
+  'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
+  'https://unpkg.com/three@0.160.0/build/three.min.js'
+];
+const RENDERER_URLS=[
+  'https://cdn.jsdelivr.net/npm/schematic-renderer@1.6.1/dist/schematic-renderer.umd.js',
+  'https://unpkg.com/schematic-renderer@1.6.1/dist/schematic-renderer.umd.js'
+];
 const VANILLA_PACK_URL='https://raw.githubusercontent.com/Schem-at/schematic-renderer/master/test/public/pack.zip';
 
 const modal=document.getElementById('preview3dModal');
@@ -77,6 +84,36 @@ async function buildWrapper(SchematicWrapper){
   }
   return{wrapper,count:total,size:[maxX-minX+1,maxY-minY+1,maxZ-minZ+1]};
 }
+function loadScript(src){
+  return new Promise((resolve,reject)=>{
+    const existing=[...document.scripts].find(s=>s.src===src);
+    if(existing){
+      if(existing.dataset.loaded==='1')return resolve();
+      existing.addEventListener('load',()=>resolve(),{once:true});
+      existing.addEventListener('error',()=>reject(new Error('Failed to load '+src)),{once:true});
+      return;
+    }
+    const s=document.createElement('script');
+    s.src=src;s.async=true;s.crossOrigin='anonymous';
+    s.onload=()=>{s.dataset.loaded='1';resolve()};
+    s.onerror=()=>{s.remove();reject(new Error('Failed to load '+src))};
+    document.head.appendChild(s);
+  });
+}
+async function loadFirst(urls,test,label){
+  if(test())return;
+  let lastErr=null;
+  for(const url of urls){
+    try{
+      setStatus('Loading '+label+'…');
+      await loadScript(url);
+      if(test())return;
+      lastErr=new Error(label+' loaded but did not expose its browser API');
+    }catch(err){lastErr=err}
+  }
+  throw lastErr||new Error('Could not load '+label);
+}
+
 async function initRenderer(){
   if(renderer)return renderer;
   if(readyPromise)return readyPromise;
@@ -84,10 +121,16 @@ async function initRenderer(){
   setStatus('Loading Schem-at renderer…');
   readyPromise=new Promise((resolve,reject)=>{
     readyResolve=resolve;
-    setTimeout(()=>reject(new Error('3D renderer initialization timed out. Check your network/WebGL support.')),30000);
+    setTimeout(()=>reject(new Error('3D renderer initialization timed out. Check WebGL/browser support.')),45000);
   });
-  try{api=await import(RENDERER_URL)}
-  catch(err){readyPromise=null;throw new Error('Could not load Schem-at renderer: '+(err?.message||err))}
+  try{
+    await loadFirst(THREE_URLS,()=>!!window.THREE,'Three.js');
+    await loadFirst(RENDERER_URLS,()=>!!window.SchematicRenderer?.SchematicRenderer,'Schem-at renderer');
+    api=window.SchematicRenderer;
+  }catch(err){
+    readyPromise=null;
+    throw new Error('Could not load the 3D renderer: '+(err?.message||err));
+  }
   const {SchematicRenderer}=api;
   renderer=new SchematicRenderer(
     canvas,
@@ -95,9 +138,19 @@ async function initRenderer(){
     {
       vanillaPack:async()=>{
         setLoading(true,'Loading vanilla resource pack…','One-time 3D texture/model load');
-        const r=await fetch(VANILLA_PACK_URL);
-        if(!r.ok)throw new Error('Could not load vanilla 3D resource pack ('+r.status+')');
-        return new Blob([await r.arrayBuffer()],{type:'application/zip'});
+        const packUrls=[
+          VANILLA_PACK_URL,
+          'https://cdn.jsdelivr.net/gh/Schem-at/schematic-renderer@master/test/public/pack.zip'
+        ];
+        let lastErr=null;
+        for(const url of packUrls){
+          try{
+            const r=await fetch(url);
+            if(!r.ok)throw new Error('HTTP '+r.status);
+            return new Blob([await r.arrayBuffer()],{type:'application/zip'});
+          }catch(err){lastErr=err}
+        }
+        throw new Error('Could not load vanilla 3D resource pack: '+(lastErr?.message||lastErr));
       }
     },
     {
