@@ -58,6 +58,18 @@ function cleanBlockName(s){
   const colon=s.indexOf(':');if(colon>=0)s=s.slice(colon+1);
   return s||'air';
 }
+function normalizeBlockState(s){
+  if(!s)return 'minecraft:air';
+  s=String(s).trim();
+  if(!s.includes(':'))s='minecraft:'+s;
+  return s;
+}
+function compoundBlockState(p){
+  const name=normalizeBlockState(p?.Name||'minecraft:air');
+  const props=p?.Properties&&typeof p.Properties==='object'?Object.entries(p.Properties):[];
+  if(!props.length)return name;
+  return name+'['+props.map(([k,v])=>k+'='+v).join(',')+']';
+}
 function isAir(id){return AIR.has(cleanBlockName(id));}
 
 function decodeVarInts(bytes,count){
@@ -75,10 +87,10 @@ function makeBuild(blocks,meta={}){
   for(const b of blocks){minX=Math.min(minX,b.x);minY=Math.min(minY,b.y);minZ=Math.min(minZ,b.z);maxX=Math.max(maxX,b.x);maxY=Math.max(maxY,b.y);maxZ=Math.max(maxZ,b.z);}
   if(!Number.isFinite(minX))return{layers:[{id:uid(),name:'Y 0',visible:true,cells:{}}],palette:[],width:1,depth:1,height:1,format:meta.format||'Minecraft',name:meta.name||'Imported build'};
   const height=maxY-minY+1,width=maxX-minX+1,depth=maxZ-minZ+1;
-  const byY=new Map();const palette=[];const palSet=new Set();
-  for(let y=minY;y<=maxY;y++)byY.set(y,{});
-  for(const b of blocks){const id=cleanBlockName(b.id);if(isAir(id))continue;const cells=byY.get(b.y);cells[(b.x-minX)+','+(b.z-minZ)]=id;if(!palSet.has(id)){palSet.add(id);palette.push(id);}}
-  const layers=[];let i=0;for(let y=minY;y<=maxY;y++,i++)layers.push({id:uid(),name:`Y ${y}`,sourceY:y,visible:i===0,cells:byY.get(y)});
+  const byY=new Map(),statesByY=new Map();const palette=[];const palSet=new Set();
+  for(let y=minY;y<=maxY;y++){byY.set(y,{});statesByY.set(y,{})}
+  for(const b of blocks){const id=cleanBlockName(b.id);if(isAir(id))continue;const key=(b.x-minX)+','+(b.z-minZ),cells=byY.get(b.y),states=statesByY.get(b.y);cells[key]=id;states[key]=normalizeBlockState(b.state||b.id);if(!palSet.has(id)){palSet.add(id);palette.push(id);}}
+  const layers=[];let i=0;for(let y=minY;y<=maxY;y++,i++)layers.push({id:uid(),name:`Y ${y}`,sourceY:y,visible:i===0,cells:byY.get(y),states:statesByY.get(y)});
   return{layers,palette,width,depth,height,format:meta.format||'Minecraft',name:meta.name||'Imported build',bounds:{minX,minY,minZ,maxX,maxY,maxZ}};
 }
 function uid(){return (globalThis.crypto&&crypto.randomUUID)?crypto.randomUUID():'layer-'+Math.random().toString(36).slice(2)+Date.now().toString(36);}
@@ -91,12 +103,12 @@ function parseSponge(root){
   const paletteObj=container.Palette||s.Palette;
   const data=container.Data||s.BlockData;
   if(!paletteObj||!data)throw new Error('Sponge schematic is missing Palette or block Data');
-  const reverse=[];for(const [name,index] of Object.entries(paletteObj))reverse[Number(index)]=cleanBlockName(name);
+  const reverse=[];for(const [name,index] of Object.entries(paletteObj))reverse[Number(index)]={id:cleanBlockName(name),state:normalizeBlockState(name)};
   const total=width*height*length,indices=decodeVarInts(data,total),blocks=[];
   for(let i=0;i<total;i++){
-    const id=reverse[indices[i]]||'air';if(isAir(id))continue;
+    const entry=reverse[indices[i]]||{id:'air',state:'minecraft:air'},id=entry.id;if(isAir(id))continue;
     const y=Math.floor(i/(width*length)),rem=i-y*width*length,z=Math.floor(rem/width),x=rem-z*width;
-    blocks.push({x,y,z,id});
+    blocks.push({x,y,z,id,state:entry.state});
   }
   return makeBuild(blocks,{format:'Sponge .schem',name:s.Metadata?.Name||'Imported schematic',bounds:{minX:0,minY:0,minZ:0,maxX:width-1,maxY:height-1,maxZ:length-1}});
 }
@@ -116,12 +128,12 @@ function parseLitematic(root){
     if(!sx||!sy||!sz)continue;
     const origin={x:pos.x+(size.x<0?size.x+1:0),y:pos.y+(size.y<0?size.y+1:0),z:pos.z+(size.z<0?size.z+1:0)};
     minX=Math.min(minX,origin.x);minY=Math.min(minY,origin.y);minZ=Math.min(minZ,origin.z);maxX=Math.max(maxX,origin.x+sx-1);maxY=Math.max(maxY,origin.y+sy-1);maxZ=Math.max(maxZ,origin.z+sz-1);
-    const palette=(r.BlockStatePalette||[]).map(p=>cleanBlockName(p?.Name));
+    const palette=(r.BlockStatePalette||[]).map(p=>({id:cleanBlockName(p?.Name),state:compoundBlockState(p)}));
     const longs=r.BlockStates||[];const bits=Math.max(2,Math.ceil(Math.log2(Math.max(1,palette.length))));const volume=sx*sy*sz;
     for(let i=0;i<volume;i++){
-      const pi=unpackLitematicIndex(longs,i,bits),id=palette[pi]||'air';if(isAir(id))continue;
+      const pi=unpackLitematicIndex(longs,i,bits),entry=palette[pi]||{id:'air',state:'minecraft:air'},id=entry.id;if(isAir(id))continue;
       const y=Math.floor(i/(sx*sz)),rem=i-y*sx*sz,z=Math.floor(rem/sx),x=rem-z*sx;
-      blocks.push({x:origin.x+x,y:origin.y+y,z:origin.z+z,id,region:regionName});
+      blocks.push({x:origin.x+x,y:origin.y+y,z:origin.z+z,id,state:entry.state,region:regionName});
     }
   }
   const name=root.Metadata?.Name||'Imported litematic';return makeBuild(blocks,{format:'Litematica',name,bounds:Number.isFinite(minX)?{minX,minY,minZ,maxX,maxY,maxZ}:undefined});
@@ -169,7 +181,7 @@ function parseLegacy(root){
   for(let i=0;i<total;i++){
     let id=raw[i];if(add&&add.length){const nib=add[i>>1]||0;id|=((i&1)?(nib>>4):(nib&15))<<8;}
     const name=legacyName(id,data[i]||0);if(isAir(name))continue;
-    const y=Math.floor(i/(width*length)),rem=i-y*width*length,z=Math.floor(rem/width),x=rem-z*width;blocks.push({x,y,z,id:name});
+    const y=Math.floor(i/(width*length)),rem=i-y*width*length,z=Math.floor(rem/width),x=rem-z*width;blocks.push({x,y,z,id:name,state:'minecraft:'+name});
   }
   return makeBuild(blocks,{format:'Legacy .schematic',name:'Imported schematic',bounds:{minX:0,minY:0,minZ:0,maxX:width-1,maxY:height-1,maxZ:length-1}});
 }
@@ -182,5 +194,5 @@ async function importFile(file){
   throw new Error('Unsupported schematic format. Use .schem, .schematic, .litematic, or .litematica.');
 }
 
-return{NBTReader,decompressMaybe,decodeVarInts,parseSponge,parseLitematic,parseLegacy,legacyName,importFile,makeBuild,cleanBlockName,unpackLitematicIndex};
+return{NBTReader,decompressMaybe,decodeVarInts,parseSponge,parseLitematic,parseLegacy,legacyName,importFile,makeBuild,cleanBlockName,normalizeBlockState,compoundBlockState,unpackLitematicIndex};
 });
