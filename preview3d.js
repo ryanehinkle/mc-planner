@@ -2,6 +2,10 @@ const THREE_URLS=[
   'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
   'https://unpkg.com/three@0.160.0/build/three.min.js'
 ];
+const NUCLEATION_URLS=[
+  'https://cdn.jsdelivr.net/npm/nucleation@0.2.12/nucleation-cdn-loader.js',
+  'https://unpkg.com/nucleation@0.2.12/nucleation-cdn-loader.js'
+];
 const RENDERER_URLS=[
   'https://cdn.jsdelivr.net/npm/schematic-renderer@1.6.1/dist/schematic-renderer.umd.js',
   'https://unpkg.com/schematic-renderer@1.6.1/dist/schematic-renderer.umd.js'
@@ -93,10 +97,25 @@ function loadScript(src){
       existing.addEventListener('error',()=>reject(new Error('Failed to load '+src)),{once:true});
       return;
     }
+    let runtimeError=null;
+    const onRuntimeError=e=>{
+      if(!e.filename||e.filename===src||e.filename.includes(new URL(src).hostname)){
+        runtimeError=e.error||new Error(e.message||'Script execution failed');
+      }
+    };
+    window.addEventListener('error',onRuntimeError);
     const s=document.createElement('script');
     s.src=src;s.async=true;s.crossOrigin='anonymous';
-    s.onload=()=>{s.dataset.loaded='1';resolve()};
-    s.onerror=()=>{s.remove();reject(new Error('Failed to load '+src))};
+    s.onload=()=>{
+      window.removeEventListener('error',onRuntimeError);
+      s.dataset.loaded='1';
+      if(runtimeError)reject(runtimeError);else resolve();
+    };
+    s.onerror=()=>{
+      window.removeEventListener('error',onRuntimeError);
+      s.remove();
+      reject(new Error('Failed to load '+src));
+    };
     document.head.appendChild(s);
   });
 }
@@ -113,6 +132,32 @@ async function loadFirst(urls,test,label){
   }
   throw lastErr||new Error('Could not load '+label);
 }
+async function loadNucleation(){
+  if(window.Nucleation?.SchematicWrapper)return window.Nucleation;
+  let lastErr=null;
+  for(const url of NUCLEATION_URLS){
+    try{
+      setStatus('Loading Minecraft schematic engine…');
+      const mod=await import(url);
+      const init=mod.default||mod.init;
+      if(typeof init==='function')await init();
+      if(!mod.SchematicWrapper)throw new Error('Nucleation module is missing SchematicWrapper');
+      window.Nucleation=mod;
+      return mod;
+    }catch(err){lastErr=err}
+  }
+  throw new Error('Could not load Nucleation: '+(lastErr?.message||lastErr));
+}
+function getRendererNamespace(){
+  const g=window.SchematicRenderer;
+  if(g&&typeof g.SchematicRenderer==='function')return g;
+  if(typeof g==='function')return {SchematicRenderer:g,...(window.Nucleation||{})};
+  for(const key of Object.keys(window)){
+    const v=window[key];
+    if(v&&typeof v==='object'&&typeof v.SchematicRenderer==='function')return v;
+  }
+  return null;
+}
 
 async function initRenderer(){
   if(renderer)return renderer;
@@ -125,8 +170,11 @@ async function initRenderer(){
   });
   try{
     await loadFirst(THREE_URLS,()=>!!window.THREE,'Three.js');
-    await loadFirst(RENDERER_URLS,()=>!!window.SchematicRenderer?.SchematicRenderer,'Schem-at renderer');
-    api=window.SchematicRenderer;
+    await loadNucleation();
+    await loadFirst(RENDERER_URLS,()=>!!getRendererNamespace(),'Schem-at renderer');
+    const rendererApi=getRendererNamespace();
+    if(!rendererApi)throw new Error('Schem-at renderer browser API was not found after loading');
+    api={...(window.Nucleation||{}),...rendererApi};
   }catch(err){
     readyPromise=null;
     throw new Error('Could not load the 3D renderer: '+(err?.message||err));
@@ -201,7 +249,8 @@ async function loadCurrentProject(){
   loadingProject=true;
   try{
     const r=await initRenderer();
-    const {SchematicWrapper}=api;
+    const SchematicWrapper=api?.SchematicWrapper||window.Nucleation?.SchematicWrapper;
+    if(!SchematicWrapper)throw new Error('Minecraft schematic engine is unavailable.');
     setLoading(true,'Building 3D project…','Converting planner layers into a Minecraft schematic');
     setStatus('Building current project…');
     const built=await buildWrapper(SchematicWrapper);
