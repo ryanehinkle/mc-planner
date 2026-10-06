@@ -10,7 +10,7 @@ const state={
  tool:'brush', brushSize:1, zoom:1, baseCell:24, panX:0, panY:0, mirrorLines:[], mirrorHover:null, mirrorAngle:0,
  showGrid:true, showChunks:true, showCoords:true, autosave:true,
  current:'stone_bricks', blocks:[], blockMap:new Map(), textureCache:new Map(), palette:['stone_bricks'],
- layers:[{id:crypto.randomUUID(),name:'Layer 1',visible:true,cells:{}}], activeLayer:0,
+ layers:[{id:crypto.randomUUID(),name:'Layer 1',visible:true,cells:{},states:{}}], activeLayer:0,
  history:[], future:[], dragging:false, panning:false, spacePan:false, start:null, hover:null,
  preview:[], polygon:[], curveStage:null, reference:null, refOpacity:.35, refScale:1
 };
@@ -175,9 +175,11 @@ function mirrorPreview(points){
  return uniq(out);
 }
 function paintAt(x,y,id=state.current,erase=false){
- const bs=state.brushSize, half=Math.floor(bs/2);
+ const bs=state.brushSize, half=Math.floor(bs/2),L=layer();L.states=L.states||{};
  for(let ox=-half;ox<bs-half;ox++)for(let oy=-half;oy<bs-half;oy++)for(const [mx,my] of mirroredPoints(x+ox,y+oy)){
-  const k=cellKey(mx,my);if(erase)delete layer().cells[k];else layer().cells[k]=id;
+  const k=cellKey(mx,my);
+  if(erase){delete L.cells[k];delete L.states[k]}
+  else{L.cells[k]=id;L.states[k]='minecraft:'+id}
  }
 }
 function bresenham(a,b){let pts=[],x0=a.x,y0=a.y,x1=b.x,y1=b.y,dx=Math.abs(x1-x0),sx=x0<x1?1:-1,dy=-Math.abs(y1-y0),sy=y0<y1?1:-1,err=dx+dy;while(true){pts.push({x:x0,y:y0});if(x0===x1&&y0===y1)break;let e=2*err;if(e>=dy){err+=dy;x0+=sx}if(e<=dx){err+=dx;y0+=sy}}return pts}
@@ -251,6 +253,23 @@ function updateUndoRedo(){$('#undoBtn').disabled=!state.history.length;$('#redoB
 function autosave(){if(!state.autosave)return;try{localStorage.setItem('mc-planner-v1',JSON.stringify(projectData()))}catch(e){}}
 function projectData(){return{version:1,layers:state.layers,activeLayer:state.activeLayer,palette:state.palette,current:state.current,panX:state.panX,panY:state.panY,zoom:state.zoom,mirrorLines:state.mirrorLines,mirrorAngle:state.mirrorAngle,settings:{grid:state.showGrid,chunks:state.showChunks,coords:state.showCoords}}}
 function loadProject(v){if(!v||!Array.isArray(v.layers))throw Error('Invalid project');state.layers=v.layers;state.activeLayer=v.activeLayer||0;state.palette=v.palette||[];state.current=v.current||'stone_bricks';state.panX=v.panX??state.panX;state.panY=v.panY??state.panY;state.zoom=v.zoom||1;state.mirrorLines=Array.isArray(v.mirrorLines)?v.mirrorLines:(v.mirrorLine?[{x:v.mirrorLine.a?.x??0,y:v.mirrorLine.a?.y??0,angle:0}]:[]);state.mirrorAngle=Number.isFinite(v.mirrorAngle)?v.mirrorAngle:0;updateMirrorStatus();if(v.settings){state.showGrid=v.settings.grid!==false;state.showChunks=v.settings.chunks!==false;state.showCoords=v.settings.coords!==false}state.history=[];state.future=[];syncSettings();renderUI();draw();autosave()}
+window.MCPlanner3DSource={
+ getProject(){
+  return {
+   layers:state.layers.map((L,i)=>({
+    name:L.name,
+    sourceY:Number.isFinite(L.sourceY)?L.sourceY:i,
+    cells:{...L.cells},
+    states:{...(L.states||{})}
+   })),
+   current:state.current
+  };
+ },
+ getBlockCount(){
+  return state.layers.reduce((n,L)=>n+Object.keys(L.cells||{}).length,0);
+ }
+};
+
 function download(name,data,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function exportImage(){
  const oldHover=state.hover,oldPrev=state.preview;state.hover=null;state.preview=[];draw();
@@ -288,10 +307,10 @@ $('#currentBlock').onclick=$('#chooseBlockBtn').onclick=()=>openModal('blockModa
 $('#settingsBtn').onclick=()=>openModal('settingsModal');$('#helpBtn').onclick=()=>openModal('helpModal');$('#referenceBtn').onclick=()=>openModal('referenceModal');
 $('#brushSize').oninput=e=>{state.brushSize=+e.target.value;$('#brushSizeLabel').textContent=e.target.value};
 $('#gridToggle').onchange=e=>{state.showGrid=e.target.checked;draw();autosave()};$('#chunkToggle').onchange=e=>{state.showChunks=e.target.checked;draw();autosave()};$('#coordsToggle').onchange=e=>{state.showCoords=e.target.checked;draw();autosave()};$('#autosaveToggle').onchange=e=>state.autosave=e.target.checked;
-$('#addLayerBtn').onclick=()=>{pushHistory();state.layers.push({id:crypto.randomUUID(),name:'Layer '+(state.layers.length+1),visible:true,cells:{}});state.activeLayer=state.layers.length-1;renderUI();draw();autosave()};
+$('#addLayerBtn').onclick=()=>{pushHistory();state.layers.push({id:crypto.randomUUID(),name:'Layer '+(state.layers.length+1),visible:true,cells:{},states:{}});state.activeLayer=state.layers.length-1;renderUI();draw();autosave()};
 $('#clearPaletteBtn').onclick=()=>{const used=countMaterials();state.palette=state.palette.filter(id=>used.has(id)||id===state.current);renderPalette();autosave()};
 $('#undoBtn').onclick=undo;$('#redoBtn').onclick=redo;
-$('#newBtn').onclick=()=>{if(!confirm('Start a new plan?'))return;pushHistory();state.layers=[{id:crypto.randomUUID(),name:'Layer 1',visible:true,cells:{}}];state.activeLayer=0;state.palette=[state.current];state.mirrorLines=[];state.mirrorHover=null;updateMirrorStatus();renderUI();draw();autosave()};
+$('#newBtn').onclick=()=>{if(!confirm('Start a new plan?'))return;pushHistory();state.layers=[{id:crypto.randomUUID(),name:'Layer 1',visible:true,cells:{},states:{}}];state.activeLayer=0;state.palette=[state.current];state.mirrorLines=[];state.mirrorHover=null;updateMirrorStatus();renderUI();draw();autosave()};
 $('#saveBtn').onclick=()=>download('mc-planner.mcplan',JSON.stringify(projectData()),'application/json');
 function fitImportedBuild(build){
  const pad=70,w=Math.max(1,build.width||1),d=Math.max(1,build.depth||1);
