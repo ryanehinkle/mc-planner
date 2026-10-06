@@ -26,20 +26,38 @@ function restore(s){const v=JSON.parse(s);state.layers=v.layers;state.activeLaye
 function undo(){if(!state.history.length)return;state.future.push(snapshot());restore(state.history.pop())}
 function redo(){if(!state.future.length)return;state.history.push(snapshot());restore(state.future.pop())}
 
-function guessTexture(id, textures){
- const candidates=[id,
-  id.replace(/_(stairs|slab|wall|fence|fence_gate|button|pressure_plate)$/,'_planks'),
-  id.replace(/_(stairs|slab|wall)$/,''),
-  id.replace(/_wall$/,''),
-  id.replace(/_(door|trapdoor)$/,'_planks'),
-  id.replace(/_(sign|hanging_sign)$/,'_planks'),
-  id.replace(/^waxed_/,''),
-  id+'_side',id+'_top',
- ];
- const wood=id.match(/^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|bamboo|crimson|warped)_/);
- if(wood)candidates.push(wood[1]+(wood[1]==='bamboo'?'_planks':'_planks'));
- const copper=id.includes('copper')?[id.replace(/_(stairs|slab|grate|door|trapdoor|bulb).*$/,''),id.replace(/^waxed_/,'')]:[];
- for(const c of [...candidates,...copper]) if(textures.has(c+'.png')) return c+'.png';
+function guessTexture(id,textures){
+ const has=n=>n&&textures.has(n+'.png')?n+'.png':null;
+ const first=(...xs)=>{for(const n of xs.flat()){const r=has(n);if(r)return r}return null};
+ const woods=['oak','spruce','birch','jungle','acacia','dark_oak','mangrove','cherry','pale_oak','bamboo','crimson','warped','poplar'];
+ if(/^(air|cave_air|void_air|structure_void|barrier|end_gateway)$/.test(id))return null;
+ const special={moving_piston:'piston_top',piston_head:'piston_top',piston:'piston_top',sticky_piston:'piston_top_sticky',magma_block:'magma',snow_block:'snow',dried_kelp_block:'dried_kelp_top',moss_carpet:'moss_block',smooth_quartz:'quartz_block_bottom',smooth_sandstone:'sandstone_top',smooth_red_sandstone:'red_sandstone_top',light_weighted_pressure_plate:'gold_block',heavy_weighted_pressure_plate:'iron_block',decorated_pot:'flower_pot',bubble_column:'water_still',pitcher_plant:'pitcher_crop_top',redstone_wire:'redstone_dust_dot',bamboo_sapling:'bamboo_stage0'};
+ if(special[id])return first(special[id]);
+ if(/_carpet$/.test(id))return first(id.replace(/_carpet$/,'_wool'),id.replace(/_carpet$/,'_block'),id.replace(/_carpet$/,''));
+ if(/(_wall_)?banner$/.test(id))return first(id.replace(/_(wall_)?banner$/,'_wool'),'white_wool');
+ if(/_candle_cake$/.test(id)||id==='candle_cake')return first('cake_top','cake_side');
+ if(/^potted_/.test(id))return first(id.replace(/^potted_/,''),'flower_pot');
+ if(/_wall_fan$/.test(id))return first(id.replace(/_wall_fan$/,'_fan'),id.replace(/_wall_fan$/,''));
+ if(/wall_torch$/.test(id))return first(id.replace(/_wall_torch$/,'_torch'),id.replace(/^wall_/,''));
+ if(/cauldron$/.test(id))return first('cauldron_top','cauldron_inner','cauldron_side');
+ if(/chest$/.test(id)){const c=id.replace(/^waxed_/,'').replace(/_chest$/,'');return first(c,c+'_block',c==='copper'?'copper_block':null,'oak_planks')}
+ if(/(_head|_skull)$/.test(id)||/(_wall_head|_wall_skull)$/.test(id))return first('bone_block_top','bone_block_side');
+ if(/^infested_/.test(id))return guessTexture(id.replace(/^infested_/,''),textures);
+ if(/_wood$/.test(id))return first(id.replace(/_wood$/,'_log')+'_top',id.replace(/_wood$/,'_log'));
+ if(/_hyphae$/.test(id))return first(id.replace(/_hyphae$/,'_stem')+'_top',id.replace(/_hyphae$/,'_stem'));
+ if(/_golem_statue$/.test(id)){const c=id.replace(/^waxed_/,'').replace(/_golem_statue$/,'');return first(c,c+'_block',c==='copper'?'copper_block':null)}
+ const direct=first(id+'_top',id);if(direct)return direct;
+ const bases=[],unWax=id.replace(/^waxed_/,'');if(unWax!==id)bases.push(unWax);
+ const suffixes=['stairs','slab','wall','fence','fence_gate','button','pressure_plate','door','trapdoor','sign','wall_sign','hanging_sign','wall_hanging_sign'];
+ for(const suf of suffixes){const re=new RegExp('_'+suf+'$');if(re.test(id))bases.push(id.replace(re,''));if(re.test(unWax))bases.push(unWax.replace(re,''))}
+ if(id==='petrified_oak_slab')bases.push('oak');
+ for(const b0 of bases){
+  if(b0==='smooth_quartz')return first('quartz_block_bottom','quartz_block_top');
+  if(b0==='smooth_sandstone')return first('sandstone_top');
+  if(b0==='smooth_red_sandstone')return first('red_sandstone_top');
+  const variants=[b0];if(woods.includes(b0))variants.unshift(b0+'_planks');if(/_brick$/.test(b0))variants.push(b0+'s');if(/_tile$/.test(b0))variants.push(b0+'s');if(b0==='brick')variants.push('bricks');if(b0==='quartz')variants.push('quartz_block');if(b0==='purpur')variants.push('purpur_block');if(b0==='end_stone_brick')variants.push('end_stone_bricks');
+  for(const b of variants){const r=first(b+'_top',b);if(r)return r}
+ }
  const prefix=[...textures].find(t=>t.startsWith(id+'_')&&t.endsWith('.png'));
  return prefix||'stone.png';
 }
