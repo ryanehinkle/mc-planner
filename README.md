@@ -3,6 +3,8 @@
 A browser-based Minecraft build planner inspired by the workflow of MC Base Planner, but using real Minecraft block textures instead of flat colors.
 
 ## Features
+- Export the current project directly as a standard gzip-compressed `.litematic`
+- Preserves stored Minecraft block-state properties when available and compacts all planner Y-layers into one Litematica region
 - Full-screen interactive 3D project preview rendered natively with Three.js
 - Perspective, isometric and first-person fly cameras
 - Y-layer slicing, auto orbit, screenshots, perspective/isometric views and fly controls
